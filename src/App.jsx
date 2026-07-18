@@ -9,8 +9,13 @@ import {
 import { CATEGORY_META, DEFAULT_CATEGORY_COLORS, COLORBLIND_PALETTE, ROLE_META, DEFAULT_HOUSEHOLDS, URGENCY_RED_MS, URGENCY_YELLOW_MS } from "./constants.js";
 import { getStatus, fmtCountdown, fmtElapsed } from "./utils/status.js";
 import { dateKey, addDays, formatTimeForSpeech, nextOccurrence, formatEntryDate, timeDisplayTo24h, time24hToDisplay } from "./utils/dateHelpers.js";
-import { uid, defaultCareItems, formatPhoneInput, buildHistorySummary, hoursToUnitDefault } from "./utils/misc.js";
+import { uid, formatPhoneInput, buildHistorySummary, hoursToUnitDefault } from "./utils/misc.js";
 import { loadJSON, saveJSON } from "./utils/persistence.js";
+
+// A stable (module-scope, so its array/object references never change identity across renders)
+// stand-in for "no household exists yet" — keeps every screen that reads household.children /
+// household.members safe without needing a null-check at each call site.
+const EMPTY_HOUSEHOLD = { id: null, name: "", children: [], members: [], invites: [] };
 
 // ---------------------------------------------------------------------------
 // Root app
@@ -21,10 +26,10 @@ export default function App() {
   const [authed, setAuthed] = useState(false);
   const [unlocked, setUnlocked] = useState(false); // authed=true from a remembered session still needs this before entering
   const [tab, setTab] = useState("today");
-  const [childId, setChildId] = useState("theo");
+  const [childId, setChildId] = useState("");
   const [households, setHouseholds] = useState(DEFAULT_HOUSEHOLDS);
-  const [activeHouseholdId, setActiveHouseholdId] = useState(DEFAULT_HOUSEHOLDS[0].id);
-  const household = households.find((h) => h.id === activeHouseholdId) || households[0] || DEFAULT_HOUSEHOLDS[0];
+  const [activeHouseholdId, setActiveHouseholdId] = useState(DEFAULT_HOUSEHOLDS[0]?.id ?? null);
+  const household = households.find((h) => h.id === activeHouseholdId) || households[0] || EMPTY_HOUSEHOLD;
   const [infoBank, setInfoBank] = useState({}); // keyed by household id, same pattern as careItems/timeline
   const [careItems, setCareItems] = useState({});
   const [timeline, setTimeline] = useState({});
@@ -240,15 +245,19 @@ export default function App() {
         : DEFAULT_HOUSEHOLDS;
       await saveJSON("households", hhList);
     }
-    const activeId = await loadJSON("activeHouseholdId", hhList[0]?.id || "h1");
+    const activeId = await loadJSON("activeHouseholdId", hhList[0]?.id ?? null);
 
     // Info Bank used to be one global list — migrate it to the active household
     // the first time we see the new per-household key is empty but the old one isn't.
-    let ibForActive = await loadJSON(`infoBank:${activeId}`, null);
-    if (ibForActive === null) {
-      const legacyIb = await loadJSON("infoBank", []);
-      ibForActive = legacyIb;
-      await saveJSON(`infoBank:${activeId}`, legacyIb);
+    // Nothing to migrate (or load) when there's no active household yet.
+    let ibForActive = [];
+    if (activeId) {
+      ibForActive = await loadJSON(`infoBank:${activeId}`, null);
+      if (ibForActive === null) {
+        const legacyIb = await loadJSON("infoBank", []);
+        ibForActive = legacyIb;
+        await saveJSON(`infoBank:${activeId}`, legacyIb);
+      }
     }
 
     setAuthed(!!auth.authed);
@@ -256,21 +265,23 @@ export default function App() {
     setHouseholds(hhList);
     setActiveHouseholdId(activeId);
     setSettings(st);
-    setInfoBank({ [activeId]: ibForActive });
+    setInfoBank(activeId ? { [activeId]: ibForActive } : {});
 
-    const activeHH = hhList.find((h) => h.id === activeId) || hhList[0];
+    const activeHH = hhList.find((h) => h.id === activeId) || hhList[0] || null;
     const careMap = {};
     const tlMap = {};
     const upMap = {};
-    for (const c of activeHH.children) {
-      careMap[c.id] = await loadJSON(`care:${c.id}`, c.id === "theo" ? defaultCareItems() : []);
-      tlMap[c.id] = await loadJSON(`timeline:${c.id}`, {});
-      upMap[c.id] = await loadJSON(`upcoming:${c.id}`, []);
+    if (activeHH) {
+      for (const c of activeHH.children) {
+        careMap[c.id] = await loadJSON(`care:${c.id}`, []);
+        tlMap[c.id] = await loadJSON(`timeline:${c.id}`, {});
+        upMap[c.id] = await loadJSON(`upcoming:${c.id}`, []);
+      }
     }
     setCareItems(careMap);
     setTimeline(tlMap);
     setUpcoming(upMap);
-    setChildId(activeHH.children[0]?.id || "theo");
+    setChildId(activeHH?.children[0]?.id || "");
     setTab("today");
     setLoading(false);
   }, []);
@@ -576,7 +587,7 @@ export default function App() {
     }
     setAuthed(false);
     setHouseholds(DEFAULT_HOUSEHOLDS);
-    setActiveHouseholdId(DEFAULT_HOUSEHOLDS[0].id);
+    setActiveHouseholdId(null);
     setCareItems({});
     setTimeline({});
     setUpcoming({});
@@ -606,6 +617,10 @@ export default function App() {
         onLogout={logout}
       />
     );
+  }
+
+  if (households.length === 0) {
+    return <CreateHouseholdScreen viewportH={viewportH} onCreate={addHousehold} onLogout={logout} />;
   }
 
   return (
@@ -911,8 +926,7 @@ function LoginScreen({ viewportH, onSuccess, faceIdAuto }) {
                 </button>
               </div>
               <p className="text-[11px] text-[#B7C3CC] mt-4 leading-relaxed">
-                This is a preview build — creating a household here signs you into the same demo data used throughout this prototype, not a brand-new empty account.
-                The Terms of Service and Privacy Policy links above aren't wired to real documents yet — that needs actual legal drafting before this ships, not placeholder text.
+                This is a preview build — the Terms of Service and Privacy Policy links above aren't wired to real documents yet, that needs actual legal drafting before this ships, not placeholder text.
               </p>
             </div>
           )}
@@ -962,6 +976,53 @@ function LoginScreen({ viewportH, onSuccess, faceIdAuto }) {
             Do not ship literal "encrypted" / "never leaves this device" claims until a real security
             review confirms they're true — false security claims are a real liability, not just copy. */}
         <p className="text-center text-[11px] text-[#B7C3CC] pb-6">This is an early preview — not yet reviewed for production security</p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Create a household — shown once authed if the account has no household yet:
+// a brand-new install, or every household having been deleted. This is the
+// only place a household actually gets created.
+// ---------------------------------------------------------------------------
+function CreateHouseholdScreen({ viewportH, onCreate, onLogout }) {
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const canSubmit = name.trim().length > 0 && !creating;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setCreating(true);
+    await onCreate(name);
+  };
+
+  return (
+    <div className="flex justify-center" style={{ fontFamily: "-apple-system, sans-serif", minHeight: viewportH, backgroundColor: "#F7F9FB" }}>
+      <div className="w-full max-w-[420px] relative overflow-hidden flex flex-col" style={{ height: viewportH, backgroundColor: "#F7F9FB" }}>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 flex flex-col justify-center">
+          <div className="mb-6 text-center">
+            <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: "rgba(74,127,174,0.12)" }}>
+              <Home size={24} color="#4A7FAE" />
+            </div>
+            <h1 className="font-display text-[24px] text-[#3A4048] mb-1">Create your household</h1>
+            <p className="text-[13px] text-[#8A94A0]">You're the owner — add children and invite other caregivers once you're set up.</p>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="flex flex-col gap-3">
+            <label className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ backgroundColor: "white", border: "1px solid #DCEAF5" }}>
+              <Users size={17} color="#8A94A0" />
+              <input placeholder="Household name (e.g. The Rivera Family)" value={name} onChange={(e) => setName(e.target.value)}
+                className="flex-1 text-[15px] text-[#3A4048] outline-none bg-transparent" style={{ WebkitAppearance: "none" }} />
+            </label>
+            <button type="submit" disabled={!canSubmit} className="rounded-2xl py-3.5 flex items-center justify-center gap-2 font-semibold text-[15px]"
+              style={{ WebkitAppearance: "none", backgroundColor: canSubmit ? "#4A7FAE" : "#C4CDD6", color: "white" }}>
+              Create household <ArrowRight size={17} />
+            </button>
+          </form>
+          <button type="button" onClick={onLogout} className="flex items-center justify-center gap-1.5 mx-auto mt-6 text-[13px] font-medium text-[#8A94A0]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+            <LogOut size={14} /> Log out
+          </button>
+        </div>
       </div>
     </div>
   );

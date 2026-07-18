@@ -35,13 +35,6 @@ export const ROLE_META = {
 export const URGENCY_RED_MS = 10 * 60 * 1000; // under 10 minutes left
 export const URGENCY_YELLOW_MS = 2 * 3600 * 1000; // under 2 hours left
 
-export const DEFAULT_HOUSEHOLDS = [{
-  id: "h1",
-  name: "Theo's Household",
-  children: [{ id: "theo", name: "Theo", initials: "T", age: 6 }],
-  members: [
-    { id: "m1", name: "You", initials: "Y", role: "owner", relation: "Parent", isYou: true },
-    { id: "m2", name: "Sam", initials: "S", role: "full", relation: "Parent" },
-  ],
-  invites: [],
-}];
+// No seed data: a fresh install has no household until the user creates one
+// via the "Create a household" flow.
+export const DEFAULT_HOUSEHOLDS = [];

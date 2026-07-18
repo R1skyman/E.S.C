@@ -3,13 +3,6 @@ import { dateKey, addDays, formatEntryDate } from "./dateHelpers.js";
 
 export const uid = () => Math.random().toString(36).slice(2, 9);
 
-export const defaultCareItems = () => ([
-  { id: uid(), category: "medication", title: "Advil", subtitle: "5 mL", timingModel: "scheduled", lastDone: Date.now() - 5 * 3600 * 1000, intervalHours: 6 },
-  { id: uid(), category: "medication", title: "Melatonin", subtitle: "3 mg", timingModel: "asNeeded", lastDone: Date.now() - 14 * 3600 * 1000, minGapHours: 20 },
-  { id: uid(), category: "sensory", title: "Sensory break", subtitle: "Weighted blanket + quiet room", timingModel: "asNeeded", lastDone: Date.now() - 3 * 3600 * 1000, minGapHours: 2 },
-  { id: uid(), category: "sleep", title: "Rest window", subtitle: "Last full sleep cycle", timingModel: "asNeeded", lastDone: Date.now() - 9 * 3600 * 1000, minGapHours: 6 },
-]);
-
 export function formatPhoneInput(raw) {
   const digits = raw.replace(/\D/g, "").slice(0, 10);
   if (digits.length < 4) return digits.length ? `(${digits}` : "";
