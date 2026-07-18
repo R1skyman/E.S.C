@@ -1,7 +1,11 @@
 import { CATEGORY_META } from "../constants.js";
 import { dateKey, addDays, formatEntryDate } from "./dateHelpers.js";
 
-export const uid = () => Math.random().toString(36).slice(2, 9);
+// A real UUID, not just a locally-unique token: several entities (children, care
+// items, timeline entries, ...) insert this id directly as a Postgres uuid primary
+// key, generated client-side so callers can use it immediately without waiting on
+// a round trip back from the database.
+export const uid = () => crypto.randomUUID();
 
 export function formatPhoneInput(raw) {
   const digits = raw.replace(/\D/g, "").slice(0, 10);
