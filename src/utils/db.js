@@ -53,7 +53,7 @@ function contactFromRow(row) {
 
 function settingsFromRow(row) {
   return {
-    faceIdAuto: row.face_id_auto, notifyMeds: row.notify_meds, notifyEvents: row.notify_events, notifyChannel: row.notify_channel,
+    notifyMeds: row.notify_meds, notifyEvents: row.notify_events, notifyChannel: row.notify_channel,
     profile: { firstName: row.first_name || "", lastName: row.last_name || "", email: row.email || "", phone: row.phone || "" },
     categoryColors: row.category_colors || {}, readAloud: row.read_aloud,
   };
@@ -125,7 +125,7 @@ export async function fetchOrCreateSettings(userId, defaults) {
   throwIfError(error);
   if (data) return settingsFromRow(data);
   const { data: created, error: insErr } = await supabase.from("user_settings").insert({
-    user_id: userId, face_id_auto: defaults.faceIdAuto, notify_meds: defaults.notifyMeds, notify_events: defaults.notifyEvents,
+    user_id: userId, notify_meds: defaults.notifyMeds, notify_events: defaults.notifyEvents,
     notify_channel: defaults.notifyChannel, first_name: defaults.profile.firstName, last_name: defaults.profile.lastName,
     email: defaults.profile.email, phone: defaults.profile.phone,
   }).select().single();
@@ -279,7 +279,7 @@ export async function replaceInfoBank(householdId, contacts) {
 
 export async function saveSettingsRow(userId, settings) {
   const row = {
-    face_id_auto: settings.faceIdAuto, notify_meds: settings.notifyMeds, notify_events: settings.notifyEvents,
+    notify_meds: settings.notifyMeds, notify_events: settings.notifyEvents,
     notify_channel: settings.notifyChannel, first_name: settings.profile.firstName, last_name: settings.profile.lastName,
     email: settings.profile.email, phone: settings.profile.phone, category_colors: settings.categoryColors || {},
     read_aloud: !!settings.readAloud,

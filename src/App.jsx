@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Mail, Lock, Eye, EyeOff, HeartPulse, GraduationCap, Shield, Sparkles,
-  ScanFace, ArrowRight, KeyRound, Check, Plus, Home, CalendarDays, Users, ChevronLeft,
+  ArrowRight, Check, Plus, Home, CalendarDays, Users, ChevronLeft,
   ChevronRight, Calendar, ChevronRight as ChevRight, X,
   MoreHorizontal, Settings as SettingsIcon, User, Bell, LogOut, HelpCircle, BookOpen, FolderKanban, ShieldCheck, RefreshCw, Phone, AlertTriangle, Activity, Search, MapPin, Pencil,
   Link as LinkIcon, WifiOff, Share2, Copy, BellRing, Palette, Volume2,
@@ -10,7 +10,7 @@ import { CATEGORY_META, DEFAULT_CATEGORY_COLORS, COLORBLIND_PALETTE, ROLE_META, 
 import { getStatus, fmtCountdown, fmtElapsed } from "./utils/status.js";
 import { dateKey, addDays, formatTimeForSpeech, nextOccurrence, formatEntryDate, timeDisplayTo24h, time24hToDisplay } from "./utils/dateHelpers.js";
 import { uid, formatPhoneInput, buildHistorySummary, hoursToUnitDefault } from "./utils/misc.js";
-import { supabase } from "./utils/supabase.js";
+import { supabase, getRememberMe, setRememberMe } from "./utils/supabase.js";
 import {
   fetchHouseholds, fetchChildData, fetchInfoBank, fetchOrCreateSettings, fetchActiveHouseholdId,
   createHousehold, updateHouseholdName, deleteHouseholdRow,
@@ -34,7 +34,6 @@ export default function App() {
   const [session, setSession] = useState(null); // real Supabase session; null = signed out
   const [authChecked, setAuthChecked] = useState(false); // has the initial getSession() resolved?
   const authed = !!session;
-  const [unlocked, setUnlocked] = useState(false); // authed=true from a remembered session still needs this before entering
   const [dbError, setDbError] = useState(null); // last failed read/write, shown as a dismissible banner
   const [tab, setTab] = useState("today");
   const [childId, setChildId] = useState("");
@@ -49,7 +48,7 @@ export default function App() {
   const [quickLogOpen, setQuickLogOpen] = useState(false);
   const [timelineOffset, setTimelineOffset] = useState(0); // which day Timeline is currently showing, relative to today
   const [settings, setSettings] = useState({
-    faceIdAuto: false, notifyMeds: true, notifyEvents: true, notifyChannel: "email",
+    notifyMeds: true, notifyEvents: true, notifyChannel: "email",
     profile: { firstName: "", lastName: "", email: "", phone: "" },
     categoryColors: {}, // per-category color overrides, keyed by category — empty means "use defaults"
     readAloud: false, // tap-to-hear accessibility mode
@@ -238,7 +237,7 @@ export default function App() {
   // (app force-quit and reopened). Reusable so a "simulate reopening" action can trigger the
   // same path without actually reloading the artifact.
   const defaultSettingsShape = {
-    faceIdAuto: false, notifyMeds: true, notifyEvents: true, notifyChannel: "email",
+    notifyMeds: true, notifyEvents: true, notifyChannel: "email",
     profile: { firstName: "", lastName: "", email: "", phone: "" },
   };
 
@@ -246,7 +245,6 @@ export default function App() {
   // exactly what happens on a real cold start, and also what "simulate reopening" re-runs.
   const bootstrap = useCallback(async (sess) => {
     setLoading(true);
-    setUnlocked(false); // a resumed/remembered session always starts locked and must clear the gate below
     try {
       const userId = sess.user.id;
       const st = await fetchOrCreateSettings(userId, defaultSettingsShape);
@@ -634,13 +632,6 @@ export default function App() {
     await persistTimeline(cid, { ...tl, [dayKey]: nextDay });
   }, [timeline, persistTimeline]);
 
-  // Real sign-in (see LoginScreen) already establishes the Supabase session, which flows
-  // into `session`/`authed` via the onAuthStateChange listener above — this just clears
-  // the "prove it's you again" gate for a resumed session.
-  const handleLoginSuccess = () => {
-    setUnlocked(true);
-  };
-
   const persistSettings = useCallback(async (next) => {
     try {
       await saveSettingsRow(session.user.id, next);
@@ -663,7 +654,6 @@ export default function App() {
 
   const logout = useCallback(async () => {
     await supabase.auth.signOut(); // session -> null flows through onAuthStateChange, which resets app state
-    setUnlocked(false);
     setTab("today");
   }, []);
 
@@ -682,7 +672,7 @@ export default function App() {
       setTimeline({});
       setUpcoming({});
       setInfoBank({});
-      setSettings({ faceIdAuto: false, notifyMeds: true, notifyEvents: true, notifyChannel: "email", profile: { firstName: "", lastName: "", email: "", phone: "" } });
+      setSettings({ notifyMeds: true, notifyEvents: true, notifyChannel: "email", profile: { firstName: "", lastName: "", email: "", phone: "" } });
       setTab("today");
     } catch (e) {
       console.error("deleteAllData failed", e);
@@ -699,18 +689,7 @@ export default function App() {
   }
 
   if (!authed) {
-    return <LoginScreen viewportH={viewportH} onSuccess={handleLoginSuccess} faceIdAuto={settings.faceIdAuto} />;
-  }
-
-  if (!unlocked && settings.faceIdAuto) {
-    return (
-      <UnlockScreen
-        viewportH={viewportH}
-        faceIdAuto={settings.faceIdAuto}
-        onUnlock={() => setUnlocked(true)}
-        onLogout={logout}
-      />
-    );
+    return <LoginScreen viewportH={viewportH} />;
   }
 
   if (households.length === 0) {
@@ -834,17 +813,15 @@ export default function App() {
 // ---------------------------------------------------------------------------
 // Login
 // ---------------------------------------------------------------------------
-function LoginScreen({ viewportH, onSuccess, faceIdAuto }) {
+function LoginScreen({ viewportH }) {
   const [step, setStep] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showSignupPassword, setShowSignupPassword] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
+  const [rememberMe, setRememberMeChecked] = useState(getRememberMe());
   const [submitting, setSubmitting] = useState(false);
   const [authError, setAuthError] = useState(null);
-  const scanTimer = useRef(null);
 
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
@@ -856,67 +833,33 @@ function LoginScreen({ viewportH, onSuccess, faceIdAuto }) {
 
   const canSubmit = email.trim().length > 3 && password.length >= 6;
 
+  // No separate onSuccess call needed after either of these: a successful sign-in/sign-up
+  // updates the Supabase session, which flows into the root App component's `session` state
+  // via its onAuthStateChange listener and takes it off this screen on its own.
   const login = async () => {
     if (!canSubmit) return;
     setAuthError(null);
     setSubmitting(true);
     try {
+      setRememberMe(rememberMe); // decides whether the session below lands in localStorage or sessionStorage
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) { setAuthError(error.message); return; }
-      onSuccess();
+      if (error) setAuthError(error.message);
     } finally {
       setSubmitting(false);
     }
-  };
-
-  // Face ID / passcode are alternate confirmation steps for the SAME email+password already
-  // typed on the login form (there's no separate biometric or passcode credential to check
-  // against) — both end up calling the same real sign-in.
-  const startScan = () => {
-    setAuthError(null);
-    setScanning(true); setScanProgress(0);
-    let p = 0;
-    scanTimer.current = setInterval(() => {
-      p += 4; setScanProgress(Math.min(p, 100));
-      if (p >= 100) {
-        clearInterval(scanTimer.current);
-        setTimeout(async () => {
-          const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-          if (error) { setAuthError(error.message); setScanning(false); setScanProgress(0); setStep("login"); return; }
-          setStep("success");
-          setTimeout(() => onSuccess(), 700);
-        }, 300);
-      }
-    }, 40);
-  };
-  useEffect(() => () => scanTimer.current && clearInterval(scanTimer.current), []);
-
-  useEffect(() => {
-    if (step === "faceid" && faceIdAuto) {
-      const t = setTimeout(() => startScan(), 500);
-      return () => clearTimeout(t);
-    }
-  }, [step, faceIdAuto]);
-
-  const usePasscodeInstead = async () => {
-    setAuthError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) { setAuthError(error.message); setStep("login"); return; }
-    setStep("success");
-    setTimeout(() => onSuccess(), 700);
   };
 
   const signup = async () => {
     setAuthError(null);
     setSubmitting(true);
     try {
+      setRememberMe(rememberMe);
       const { data, error } = await supabase.auth.signUp({
         email: signupEmail.trim(), password: signupPassword,
         options: { data: { full_name: signupName.trim() } },
       });
       if (error) { setAuthError(error.message); return; }
-      if (data.session) onSuccess();
-      else setStep("confirm-email");
+      if (!data.session) setStep("confirm-email");
     } finally {
       setSubmitting(false);
     }
@@ -954,18 +897,17 @@ function LoginScreen({ viewportH, onSuccess, faceIdAuto }) {
                     {showPassword ? <EyeOff size={17} color="#8A94A0" /> : <Eye size={17} color="#8A94A0" />}
                   </button>
                 </label>
+                <button type="button" onClick={() => setRememberMeChecked((v) => !v)} className="flex items-center gap-2 px-0.5" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                  <div className="w-[18px] h-[18px] rounded-md flex items-center justify-center shrink-0" style={{ border: `1.5px solid ${rememberMe ? "#4A7FAE" : "#C4CDD6"}`, backgroundColor: rememberMe ? "#4A7FAE" : "white" }}>
+                    {rememberMe && <Check size={12} color="white" />}
+                  </div>
+                  <span className="text-[13px] text-[#3A4048]">Remember me on this device</span>
+                </button>
                 {authError && <p className="text-[12px] font-medium text-[#C67B6C] px-0.5">{authError}</p>}
-                <div className="mt-1 flex" style={{ borderRadius: 16, overflow: "hidden" }}>
-                  <button type="submit" disabled={!canSubmit || submitting} className="flex-1 py-3.5 flex items-center justify-center gap-2 font-semibold text-[15px]"
-                    style={{ WebkitAppearance: "none", backgroundColor: canSubmit && !submitting ? "#4A7FAE" : "#C4CDD6", color: "white" }}>
-                    {submitting ? "Logging in…" : <>Log in <ArrowRight size={17} /></>}
-                  </button>
-                  <button type="button" onClick={() => setStep("faceid")} disabled={!canSubmit} className="w-14 flex items-center justify-center shrink-0"
-                    style={{ WebkitAppearance: "none", backgroundColor: canSubmit ? "#3D6C96" : "#B3BEC9", borderLeft: "1px solid rgba(255,255,255,0.25)" }}
-                    aria-label="Sign in with Face ID">
-                    <ScanFace size={20} color="white" />
-                  </button>
-                </div>
+                <button type="submit" disabled={!canSubmit || submitting} className="mt-1 rounded-2xl py-3.5 flex items-center justify-center gap-2 font-semibold text-[15px]"
+                  style={{ WebkitAppearance: "none", backgroundColor: canSubmit && !submitting ? "#4A7FAE" : "#C4CDD6", color: "white" }}>
+                  {submitting ? "Logging in…" : <>Log in <ArrowRight size={17} /></>}
+                </button>
               </form>
               <button type="button" onClick={() => setStep("forgot")} className="block mx-auto text-[13px] font-medium text-[#4A7FAE] mt-4" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
                 Forgot password?
@@ -1088,47 +1030,6 @@ function LoginScreen({ viewportH, onSuccess, faceIdAuto }) {
             </div>
           )}
 
-          {step === "faceid" && (
-            <div className="text-center">
-              <p className="text-[12px] font-semibold tracking-wide uppercase text-[#8A94A0] mb-1">Step 2 of 2</p>
-              <h1 className="font-display text-[24px] text-[#3A4048] mb-1">Verify it's you</h1>
-              <p className="text-[13px] text-[#8A94A0] mb-8">Face scan required to open this household</p>
-              <div className="relative w-40 h-40 mx-auto mb-8 flex items-center justify-center">
-                {scanning && (<>
-                  <div className="absolute inset-0 rounded-full" style={{ border: "2px solid #4A7FAE", animation: "pulseRing 1.4s ease-out infinite" }} />
-                  <div className="absolute inset-0 rounded-full" style={{ border: "2px solid #4A7FAE", animation: "pulseRing 1.4s ease-out infinite .5s" }} />
-                </>)}
-                <div className="w-32 h-32 rounded-full flex items-center justify-center relative overflow-hidden"
-                  style={{ backgroundColor: "white", border: `2px solid ${scanProgress >= 100 ? "#5FA663" : "#4A7FAE"}` }}>
-                  <ScanFace size={54} color={scanProgress >= 100 ? "#5FA663" : "#4A7FAE"} />
-                  {scanning && scanProgress < 100 && (
-                    <div className="absolute left-0 right-0 h-[3px]" style={{ backgroundColor: "#4A7FAE", opacity: 0.7, animation: "scanline 1.6s linear infinite" }} />
-                  )}
-                </div>
-              </div>
-              {!scanning && (
-                <button onClick={startScan} className="rounded-2xl py-3.5 px-8 font-semibold text-[15px]" style={{ WebkitAppearance: "none", backgroundColor: "#4A7FAE", color: "white" }}>
-                  Scan face
-                </button>
-              )}
-              {scanning && <p className="text-[13px] font-semibold text-[#4A7FAE] tnum">{scanProgress < 100 ? "Scanning…" : "Verified"}</p>}
-              {authError && <p className="text-[12px] font-medium text-[#C67B6C] mt-3">{authError}</p>}
-              <button onClick={usePasscodeInstead} className="block mx-auto mt-6 text-[13px] font-semibold text-[#8A94A0] flex items-center gap-1"
-                style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
-                <KeyRound size={13} /> Use passcode instead
-              </button>
-            </div>
-          )}
-
-          {step === "success" && (
-            <div className="text-center">
-              <div className="w-16 h-16 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ backgroundColor: "#5FA663" }}>
-                <Check size={30} color="white" />
-              </div>
-              <h1 className="font-display text-[24px] text-[#3A4048] mb-1">You're in</h1>
-              <p className="text-[13px] text-[#8A94A0]">Taking you to your household…</p>
-            </div>
-          )}
         </div>
         {/* NOTE: this line describes the target architecture, not this prototype's actual implementation.
             Do not ship literal "encrypted" / "never leaves this device" claims until a real security
@@ -1190,76 +1091,6 @@ function CreateHouseholdScreen({ viewportH, onCreate, onLogout, dbError, onDismi
           </form>
           <button type="button" onClick={onLogout} className="flex items-center justify-center gap-1.5 mx-auto mt-6 text-[13px] font-medium text-[#8A94A0]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
             <LogOut size={14} /> Log out
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Unlock gate — shown when a session is remembered (authed) but hasn't been
-// re-verified yet this cold start. If Face ID auto-scan is on, it starts
-// immediately; either way there's a manual scan option and a passcode fallback,
-// same as full login, just without needing the email/password again.
-// ---------------------------------------------------------------------------
-function UnlockScreen({ viewportH, faceIdAuto, onUnlock, onLogout }) {
-  const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
-  const scanTimer = useRef(null);
-
-  const startScan = () => {
-    setScanning(true); setScanProgress(0);
-    let p = 0;
-    scanTimer.current = setInterval(() => {
-      p += 4; setScanProgress(Math.min(p, 100));
-      if (p >= 100) { clearInterval(scanTimer.current); setTimeout(onUnlock, 400); }
-    }, 40);
-  };
-
-  useEffect(() => () => scanTimer.current && clearInterval(scanTimer.current), []);
-  useEffect(() => {
-    if (faceIdAuto) {
-      const t = setTimeout(() => startScan(), 500);
-      return () => clearTimeout(t);
-    }
-  }, [faceIdAuto]);
-
-  return (
-    <div className="flex justify-center" style={{ fontFamily: "-apple-system, sans-serif", minHeight: viewportH, backgroundColor: "#F7F9FB" }}>
-      <div className="w-full max-w-[420px] relative overflow-hidden flex flex-col" style={{ height: viewportH, backgroundColor: "#F7F9FB" }}>
-        <div className="flex-1 flex flex-col justify-center px-6 text-center">
-          <p className="text-[12px] font-semibold tracking-wide uppercase text-[#8A94A0] mb-1">Welcome back</p>
-          <h1 className="font-display text-[24px] text-[#3A4048] mb-8">Verify it's you to continue</h1>
-
-          <div className="relative w-40 h-40 mx-auto mb-8 flex items-center justify-center">
-            {scanning && (<>
-              <div className="absolute inset-0 rounded-full" style={{ border: "2px solid #4A7FAE", animation: "pulseRing 1.4s ease-out infinite" }} />
-              <div className="absolute inset-0 rounded-full" style={{ border: "2px solid #4A7FAE", animation: "pulseRing 1.4s ease-out infinite .5s" }} />
-            </>)}
-            <div className="w-32 h-32 rounded-full flex items-center justify-center relative overflow-hidden"
-              style={{ backgroundColor: "white", border: `2px solid ${scanProgress >= 100 ? "#5FA663" : "#4A7FAE"}` }}>
-              <ScanFace size={54} color={scanProgress >= 100 ? "#5FA663" : "#4A7FAE"} />
-              {scanning && scanProgress < 100 && (
-                <div className="absolute left-0 right-0 h-[3px]" style={{ backgroundColor: "#4A7FAE", opacity: 0.7, animation: "scanline 1.6s linear infinite" }} />
-              )}
-            </div>
-          </div>
-
-          {!scanning && (
-            <button onClick={startScan} className="mx-auto rounded-2xl py-3.5 px-8 font-semibold text-[15px]"
-              style={{ WebkitAppearance: "none", backgroundColor: "#4A7FAE", color: "white" }}>
-              Scan face
-            </button>
-          )}
-          {scanning && <p className="text-[13px] font-semibold text-[#4A7FAE] tnum">{scanProgress < 100 ? "Scanning…" : "Verified"}</p>}
-
-          <button onClick={onUnlock} className="block mx-auto mt-6 text-[13px] font-semibold text-[#8A94A0] flex items-center gap-1 justify-center"
-            style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
-            <KeyRound size={13} /> Use passcode instead
-          </button>
-          <button onClick={onLogout} className="block mx-auto mt-4 text-[12px] font-medium text-[#B7C3CC]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
-            Not you? Log out
           </button>
         </div>
       </div>
@@ -3165,8 +2996,6 @@ function SettingsScreen({ settings, persistSettings, onLogout, onDeleteAllData, 
   if (section === "security") {
     return (
       <SettingsSubpage title="Security" onBack={() => setSection(null)}>
-        <SettingsToggleRow label="Auto face scan on open" desc="Skip the button — scan starts automatically when you open the app" on={settings.faceIdAuto}
-          onClick={() => persistSettings({ ...settings, faceIdAuto: !settings.faceIdAuto })} />
         <button onClick={() => setSection("password")} className="w-full flex items-center justify-between px-4 py-3.5" style={{ backgroundColor: "white", WebkitAppearance: "none" }}>
           <span className="text-[14px] text-[#3A4048] font-medium">Change password</span>
           <ChevRight size={16} color="#C4CDD6" />
