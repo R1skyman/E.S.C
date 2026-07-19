@@ -28,3 +28,13 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { storage: dynamicSessionStorage },
 });
+
+// Where signup/resend confirmation links and password-reset links should send the browser
+// back to. Using the actual running origin (rather than a hardcoded URL) means this is
+// correct in local dev, a Vercel preview, and production without any per-environment
+// config — but Supabase will only honor it if it's also added to the project's Auth ->
+// URL Configuration -> Redirect URLs allowlist; otherwise it silently falls back to the
+// project's default Site URL instead.
+export function getEmailRedirectTo() {
+  return typeof window !== "undefined" ? window.location.origin : undefined;
+}

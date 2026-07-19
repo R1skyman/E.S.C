@@ -10,7 +10,7 @@ import { CATEGORY_META, DEFAULT_CATEGORY_COLORS, COLORBLIND_PALETTE, ROLE_META, 
 import { getStatus, fmtCountdown, fmtElapsed } from "./utils/status.js";
 import { dateKey, addDays, formatTimeForSpeech, nextOccurrence, formatEntryDate, timeDisplayTo24h, time24hToDisplay } from "./utils/dateHelpers.js";
 import { uid, formatPhoneInput, buildHistorySummary, hoursToUnitDefault } from "./utils/misc.js";
-import { supabase, getRememberMe, setRememberMe } from "./utils/supabase.js";
+import { supabase, getRememberMe, setRememberMe, getEmailRedirectTo } from "./utils/supabase.js";
 import {
   fetchHouseholds, fetchChildData, fetchInfoBank, fetchOrCreateSettings, fetchActiveHouseholdId,
   createHousehold, updateHouseholdName, deleteHouseholdRow,
@@ -25,6 +25,26 @@ import {
 // household.members safe without needing a null-check at each call site.
 const EMPTY_HOUSEHOLD = { id: null, name: "", children: [], members: [], invites: [] };
 
+// Supabase reports the outcome of an email confirmation / password recovery link as query or
+// hash params on the redirect back to this app (e.g. a reused or expired signup confirmation
+// link comes back as #error=access_denied&error_code=otp_expired&error_description=...). The
+// SDK's own automatic URL handling (detectSessionInUrl) silently swallows this on failure —
+// getSession() never surfaces it — so this reads the same params independently, straight off
+// the URL, to actually show the user what went wrong instead of just dropping them on a blank
+// login screen with no explanation.
+function parseAuthCallbackError() {
+  if (typeof window === "undefined") return null;
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const query = new URLSearchParams(window.location.search);
+  const get = (key) => hash.get(key) || query.get(key);
+  const error = get("error");
+  if (!error) return null;
+  return {
+    code: get("error_code") || error,
+    description: get("error_description")?.replace(/\+/g, " ") || "That link didn't work.",
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Root app
 // ---------------------------------------------------------------------------
@@ -34,6 +54,9 @@ export default function App() {
   const [session, setSession] = useState(null); // real Supabase session; null = signed out
   const [authChecked, setAuthChecked] = useState(false); // has the initial getSession() resolved?
   const authed = !!session;
+  // Captured once, synchronously, from the very first render — before anything else has a
+  // chance to touch the URL — so a failed confirmation/recovery link is never missed.
+  const [authCallbackError, setAuthCallbackError] = useState(parseAuthCallbackError);
   const [dbError, setDbError] = useState(null); // last failed read/write, shown as a dismissible banner
   const [tab, setTab] = useState("today");
   const [childId, setChildId] = useState("");
@@ -278,6 +301,20 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Scrub error/token params out of the address bar once captured, so a refresh doesn't
+  // re-show a stale error and a successful callback doesn't leave tokens sitting in the URL.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!window.location.hash && !window.location.search) return;
+    const url = new URL(window.location.href);
+    url.hash = "";
+    for (const key of ["error", "error_code", "error_description", "code", "type"]) {
+      url.searchParams.delete(key);
+    }
+    window.history.replaceState(window.history.state, "", url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Real auth lifecycle: getSession() resolves the persisted session (if any) once on mount,
@@ -688,6 +725,10 @@ export default function App() {
     );
   }
 
+  if (authCallbackError) {
+    return <AuthCallbackErrorScreen viewportH={viewportH} error={authCallbackError} onDismiss={() => setAuthCallbackError(null)} />;
+  }
+
   if (!authed) {
     return <LoginScreen viewportH={viewportH} />;
   }
@@ -811,6 +852,78 @@ export default function App() {
 }
 
 // ---------------------------------------------------------------------------
+// Auth callback error — shown when a signup confirmation or password-recovery link comes
+// back with an error (expired, already used, or otherwise rejected) instead of a session.
+// Supabase's own automatic handling of these links (detectSessionInUrl) swallows failures
+// silently — there's no event or return value that surfaces them — so App reads the error
+// straight off the URL itself (see parseAuthCallbackError) and this screen shows it plainly,
+// with a way to get a fresh link on the spot instead of a dead end.
+// ---------------------------------------------------------------------------
+function AuthCallbackErrorScreen({ viewportH, error, onDismiss }) {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState(null); // null | "sending" | "sent" | <error message>
+
+  const resend = async () => {
+    const trimmed = email.trim();
+    if (trimmed.length <= 3 || status === "sending") return;
+    setStatus("sending");
+    const { error: resendError } = await supabase.auth.resend({
+      type: "signup", email: trimmed, options: { emailRedirectTo: getEmailRedirectTo() },
+    });
+    setStatus(resendError ? resendError.message : "sent");
+  };
+
+  const canResend = email.trim().length > 3 && status !== "sending";
+
+  return (
+    <div className="flex justify-center" style={{ fontFamily: "-apple-system, sans-serif", minHeight: viewportH, backgroundColor: "#F7F9FB" }}>
+      <div className="w-full max-w-[420px] relative overflow-hidden flex flex-col" style={{ height: viewportH, backgroundColor: "#F7F9FB" }}>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 flex flex-col justify-center">
+          <div className="mb-6 text-center">
+            <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: "rgba(198,123,108,0.12)" }}>
+              <AlertTriangle size={24} color="#C67B6C" />
+            </div>
+            <h1 className="font-display text-[22px] text-[#3A4048] mb-2">That link didn't work</h1>
+            <p className="text-[13px] text-[#8A94A0] leading-relaxed">
+              {error.description}{/\.\s*$/.test(error.description) ? "" : "."}
+              {(error.code === "otp_expired" || error.code === "access_denied") && (
+                <> Confirmation links expire after a while and only work once — if you clicked it twice, or your email app opened it automatically, this is why.</>
+              )}
+            </p>
+          </div>
+
+          {status !== "sent" ? (
+            <div className="flex flex-col gap-3">
+              <label className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ backgroundColor: "white", border: "1px solid #DCEAF5" }}>
+                <Mail size={17} color="#8A94A0" />
+                <input type="email" placeholder="Your email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  className="flex-1 text-[15px] text-[#3A4048] outline-none bg-transparent" style={{ WebkitAppearance: "none" }} />
+              </label>
+              {status && status !== "sending" && <p className="text-[12px] font-medium text-[#C67B6C] px-0.5">{status}</p>}
+              <button onClick={resend} disabled={!canResend} className="rounded-2xl py-3.5 font-semibold text-[15px]"
+                style={{ WebkitAppearance: "none", backgroundColor: canResend ? "#4A7FAE" : "#C4CDD6", color: "white" }}>
+                {status === "sending" ? "Sending…" : "Resend confirmation email"}
+              </button>
+            </div>
+          ) : (
+            <div className="text-center">
+              <div className="w-12 h-12 rounded-full mx-auto mb-3 flex items-center justify-center" style={{ backgroundColor: "#5FA663" }}>
+                <Check size={22} color="white" />
+              </div>
+              <p className="text-[13px] font-medium text-[#3A4048]">New confirmation link sent to {email.trim()} — check your email.</p>
+            </div>
+          )}
+
+          <button type="button" onClick={onDismiss} className="block mx-auto mt-6 text-[13px] font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+            Back to login
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Login
 // ---------------------------------------------------------------------------
 function LoginScreen({ viewportH }) {
@@ -830,6 +943,8 @@ function LoginScreen({ viewportH }) {
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [notConfirmed, setNotConfirmed] = useState(false); // login failed specifically because the account isn't confirmed yet
+  const [resendStatus, setResendStatus] = useState(null); // null | "sending" | "sent" | <error message>
 
   const canSubmit = email.trim().length > 3 && password.length >= 6;
 
@@ -839,14 +954,29 @@ function LoginScreen({ viewportH }) {
   const login = async () => {
     if (!canSubmit) return;
     setAuthError(null);
+    setNotConfirmed(false);
+    setResendStatus(null);
     setSubmitting(true);
     try {
       setRememberMe(rememberMe); // decides whether the session below lands in localStorage or sessionStorage
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) setAuthError(error.message);
+      if (error) {
+        setAuthError(error.message);
+        if (error.code === "email_not_confirmed") setNotConfirmed(true);
+      }
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const resendConfirmation = async (targetEmail) => {
+    const trimmed = (targetEmail || "").trim();
+    if (trimmed.length <= 3 || resendStatus === "sending") return;
+    setResendStatus("sending");
+    const { error } = await supabase.auth.resend({
+      type: "signup", email: trimmed, options: { emailRedirectTo: getEmailRedirectTo() },
+    });
+    setResendStatus(error ? error.message : "sent");
   };
 
   const signup = async () => {
@@ -856,7 +986,7 @@ function LoginScreen({ viewportH }) {
       setRememberMe(rememberMe);
       const { data, error } = await supabase.auth.signUp({
         email: signupEmail.trim(), password: signupPassword,
-        options: { data: { full_name: signupName.trim() } },
+        options: { data: { full_name: signupName.trim() }, emailRedirectTo: getEmailRedirectTo() },
       });
       if (error) { setAuthError(error.message); return; }
       if (!data.session) setStep("confirm-email");
@@ -904,6 +1034,16 @@ function LoginScreen({ viewportH }) {
                   <span className="text-[13px] text-[#3A4048]">Remember me on this device</span>
                 </button>
                 {authError && <p className="text-[12px] font-medium text-[#C67B6C] px-0.5">{authError}</p>}
+                {notConfirmed && resendStatus !== "sent" && (
+                  <button type="button" onClick={() => resendConfirmation(email)} disabled={resendStatus === "sending"}
+                    className="text-[12px] font-semibold text-[#4A7FAE] px-0.5 text-left" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    {resendStatus === "sending" ? "Sending…" : "Resend confirmation email"}
+                  </button>
+                )}
+                {resendStatus === "sent" && <p className="text-[12px] font-medium text-[#5FA663] px-0.5">New confirmation link sent — check your email.</p>}
+                {resendStatus && resendStatus !== "sending" && resendStatus !== "sent" && (
+                  <p className="text-[12px] font-medium text-[#C67B6C] px-0.5">{resendStatus}</p>
+                )}
                 <button type="submit" disabled={!canSubmit || submitting} className="mt-1 rounded-2xl py-3.5 flex items-center justify-center gap-2 font-semibold text-[15px]"
                   style={{ WebkitAppearance: "none", backgroundColor: canSubmit && !submitting ? "#4A7FAE" : "#C4CDD6", color: "white" }}>
                   {submitting ? "Logging in…" : <>Log in <ArrowRight size={17} /></>}
@@ -912,7 +1052,7 @@ function LoginScreen({ viewportH }) {
               <button type="button" onClick={() => setStep("forgot")} className="block mx-auto text-[13px] font-medium text-[#4A7FAE] mt-4" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
                 Forgot password?
               </button>
-              <button type="button" onClick={() => { setStep("signup"); setAuthError(null); }} className="block mx-auto text-[13px] text-[#8A94A0] mt-3" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+              <button type="button" onClick={() => { setStep("signup"); setAuthError(null); setNotConfirmed(false); setResendStatus(null); }} className="block mx-auto text-[13px] text-[#8A94A0] mt-3" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
                 New here? <span className="font-semibold text-[#4A7FAE]">Create a household</span>
               </button>
             </div>
@@ -1024,7 +1164,18 @@ function LoginScreen({ viewportH }) {
               <p className="text-[13px] text-[#8A94A0] mb-6">
                 We sent a confirmation link to <span className="font-semibold text-[#3A4048]">{signupEmail.trim()}</span>. Click it, then log in below.
               </p>
-              <button onClick={() => { setStep("login"); setEmail(signupEmail.trim()); }} className="text-[13px] font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+              {resendStatus === "sent" ? (
+                <p className="text-[12px] font-medium text-[#5FA663] mb-4">New confirmation link sent — check your email.</p>
+              ) : (
+                <button onClick={() => resendConfirmation(signupEmail)} disabled={resendStatus === "sending"} className="block mx-auto text-[13px] font-semibold text-[#4A7FAE] mb-4"
+                  style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                  {resendStatus === "sending" ? "Sending…" : "Didn't get it? Resend confirmation email"}
+                </button>
+              )}
+              {resendStatus && resendStatus !== "sending" && resendStatus !== "sent" && (
+                <p className="text-[12px] font-medium text-[#C67B6C] mb-4">{resendStatus}</p>
+              )}
+              <button onClick={() => { setStep("login"); setEmail(signupEmail.trim()); setResendStatus(null); }} className="text-[13px] font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
                 Back to login
               </button>
             </div>
