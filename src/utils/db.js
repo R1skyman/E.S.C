@@ -12,6 +12,7 @@ function memberFromRow(row, myUserId) {
   return {
     id: row.id,
     userId: row.user_id,
+    householdId: row.household_id,
     name: row.name,
     initials: row.initials,
     role: row.role,
@@ -191,6 +192,39 @@ export async function acceptInviteRpc(inviteId, memberName, memberInitials) {
   const { data, error } = await supabase.rpc("accept_invite", { p_invite_id: inviteId, p_member_name: memberName, p_member_initials: memberInitials });
   throwIfError(error);
   return memberFromRow(data, data.user_id);
+}
+
+// Triggers the send-invite-email Edge Function, which actually emails the invite via
+// Resend. Safe to call for a brand-new invite or to resend an existing one — the link is
+// always the same (it's just the invite's own id), so resending doesn't invalidate anything.
+export async function sendInviteEmail(inviteId) {
+  const { data, error } = await supabase.functions.invoke("send-invite-email", { body: { inviteId } });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+// Public preview of a single invite, readable by an anonymous visitor who already has its
+// (unguessable) id from the emailed link — see get_invite_info in the invite_flow migration.
+export async function getInviteInfo(inviteId) {
+  const { data, error } = await supabase.rpc("get_invite_info", { p_invite_id: inviteId });
+  throwIfError(error);
+  const row = data?.[0];
+  if (!row) return { status: "not_found" };
+  return {
+    status: row.status, householdName: row.household_name, relation: row.relation, role: row.role, email: row.email,
+  };
+}
+
+// Every still-valid invite addressed to the current account's email, across all households -
+// not just ones reachable via a link the caller happens to have. Surfaces a pending invite
+// for someone who logged in normally instead of clicking the email.
+export async function getMyPendingInvites() {
+  const { data, error } = await supabase.rpc("get_my_pending_invites");
+  throwIfError(error);
+  return (data || []).map((row) => ({
+    id: row.id, householdId: row.household_id, householdName: row.household_name, relation: row.relation, role: row.role,
+  }));
 }
 
 // ---------------------------------------------------------------------------

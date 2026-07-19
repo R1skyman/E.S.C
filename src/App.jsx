@@ -15,6 +15,7 @@ import {
   fetchHouseholds, fetchChildData, fetchInfoBank, fetchOrCreateSettings, fetchActiveHouseholdId,
   createHousehold, updateHouseholdName, deleteHouseholdRow,
   updateMember, deleteMember, insertInvite, deleteInvite, acceptInviteRpc,
+  sendInviteEmail, getInviteInfo, getMyPendingInvites,
   insertChild, updateChild, deleteChildRow,
   replaceCareItems, replaceTimelineDay, replaceUpcomingItems, replaceInfoBank,
   saveSettingsRow, saveActiveHouseholdId,
@@ -45,6 +46,14 @@ function parseAuthCallbackError() {
   };
 }
 
+// An invite email's link is just this app's origin with ?invite=<invite id> — the id itself
+// is the unguessable token (a real Postgres-generated UUID; see get_invite_info in the
+// invite_flow migration for what a holder of this id is allowed to read pre-auth).
+function parsePendingInviteId() {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("invite") || null;
+}
+
 // ---------------------------------------------------------------------------
 // Root app
 // ---------------------------------------------------------------------------
@@ -57,6 +66,11 @@ export default function App() {
   // Captured once, synchronously, from the very first render — before anything else has a
   // chance to touch the URL — so a failed confirmation/recovery link is never missed.
   const [authCallbackError, setAuthCallbackError] = useState(parseAuthCallbackError);
+  // The invite id from an emailed link, if that's how this session started. Cleared once
+  // bootstrap has actually accepted it (or it fails) — see bootstrap() and its effect below.
+  const [pendingInviteId, setPendingInviteId] = useState(parsePendingInviteId);
+  const [inviteInfo, setInviteInfo] = useState(null); // preview shown pre-auth on LoginScreen
+  const [myPendingInvites, setMyPendingInvites] = useState([]); // invites for this account found with no link involved
   const [dbError, setDbError] = useState(null); // last failed read/write, shown as a dismissible banner
   const [tab, setTab] = useState("today");
   const [childId, setChildId] = useState("");
@@ -273,11 +287,35 @@ export default function App() {
       const st = await fetchOrCreateSettings(userId, defaultSettingsShape);
       setSettings(st);
 
+      // Arrived via an invite link — accept it now that there's a session, before loading
+      // households, so the newly joined one is included below and becomes the active one.
+      // No prompt: clicking the link (or already being logged in when it's clicked) is
+      // itself the confirmation.
+      let joinedHouseholdId = null;
+      if (pendingInviteId) {
+        try {
+          const displayName = [st.profile.firstName, st.profile.lastName].filter(Boolean).join(" ").trim()
+            || sess.user.user_metadata?.full_name || "You";
+          const initials = displayName.trim()[0]?.toUpperCase() || "Y";
+          const newMember = await acceptInviteRpc(pendingInviteId, displayName, initials);
+          joinedHouseholdId = newMember.householdId;
+        } catch (e) {
+          console.error("auto-accept invite failed", e);
+          setDbError(e.message || "Couldn't accept that invite. It may have expired — ask for a new one.");
+        }
+        setPendingInviteId(null);
+      }
+
       const hhList = await fetchHouseholds(userId);
       const storedActiveId = await fetchActiveHouseholdId(userId);
-      const activeId = hhList.find((h) => h.id === storedActiveId)?.id || hhList[0]?.id || null;
+      const activeId = (joinedHouseholdId && hhList.some((h) => h.id === joinedHouseholdId))
+        ? joinedHouseholdId
+        : (hhList.find((h) => h.id === storedActiveId)?.id || hhList[0]?.id || null);
       setHouseholds(hhList);
       setActiveHouseholdId(activeId);
+      if (joinedHouseholdId && activeId === joinedHouseholdId) {
+        saveActiveHouseholdId(userId, activeId).catch((e) => console.error("saveActiveHouseholdId failed", e));
+      }
 
       const activeHH = hhList.find((h) => h.id === activeId) || null;
       if (activeHH) {
@@ -294,6 +332,20 @@ export default function App() {
         setInfoBank({});
         setChildId("");
       }
+
+      // No link was involved and there's nothing of their own yet — check whether an
+      // invite is waiting for this account anyway, so they land on "you're invited"
+      // instead of "create your own household".
+      if (!joinedHouseholdId && hhList.length === 0) {
+        try {
+          setMyPendingInvites(await getMyPendingInvites());
+        } catch (e) {
+          console.error("getMyPendingInvites failed", e);
+        }
+      } else {
+        setMyPendingInvites([]);
+      }
+
       setTab("today");
     } catch (e) {
       console.error("bootstrap failed", e);
@@ -301,7 +353,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pendingInviteId]);
 
   // Scrub error/token params out of the address bar once captured, so a refresh doesn't
   // re-show a stale error and a successful callback doesn't leave tokens sitting in the URL.
@@ -310,7 +362,7 @@ export default function App() {
     if (!window.location.hash && !window.location.search) return;
     const url = new URL(window.location.href);
     url.hash = "";
-    for (const key of ["error", "error_code", "error_description", "code", "type"]) {
+    for (const key of ["error", "error_code", "error_description", "code", "type", "invite"]) {
       url.searchParams.delete(key);
     }
     window.history.replaceState(window.history.state, "", url.toString());
@@ -347,6 +399,17 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, authChecked]);
+
+  // Pre-auth preview of an invite link, shown on LoginScreen — only needed before there's a
+  // session; once authed, bootstrap() accepts it directly instead.
+  useEffect(() => {
+    if (!pendingInviteId || session) return;
+    let active = true;
+    getInviteInfo(pendingInviteId)
+      .then((info) => { if (active) setInviteInfo(info); })
+      .catch((e) => { console.error("getInviteInfo failed", e); if (active) setInviteInfo({ status: "not_found" }); });
+    return () => { active = false; };
+  }, [pendingInviteId, session]);
 
   // Diffs the given household against current state and applies exactly the rows that
   // changed, rather than blindly rewriting everything: unlike the old single-blob
@@ -694,6 +757,25 @@ export default function App() {
     setTab("today");
   }, []);
 
+  // For a pending invite found with no link involved (see bootstrap) — unlike the direct-link
+  // flow, this one prompts first rather than auto-joining, since arriving here didn't involve
+  // clicking anything invite-specific.
+  const acceptMyPendingInvite = useCallback(async (inviteId) => {
+    try {
+      const displayName = [settings.profile.firstName, settings.profile.lastName].filter(Boolean).join(" ").trim()
+        || session?.user?.user_metadata?.full_name || "You";
+      const initials = displayName.trim()[0]?.toUpperCase() || "Y";
+      await acceptInviteRpc(inviteId, displayName, initials);
+      setMyPendingInvites([]);
+      await bootstrap(session); // reloads everything, including the newly joined household
+    } catch (e) {
+      console.error("acceptMyPendingInvite failed", e);
+      setDbError(e.message || "Couldn't accept that invite. It may have expired — ask for a new one.");
+    }
+  }, [settings, session, bootstrap]);
+
+  const dismissMyPendingInvites = useCallback(() => setMyPendingInvites([]), []);
+
   const deleteAllData = useCallback(async () => {
     try {
       for (const h of households) {
@@ -730,7 +812,17 @@ export default function App() {
   }
 
   if (!authed) {
-    return <LoginScreen viewportH={viewportH} />;
+    return <LoginScreen viewportH={viewportH} pendingInviteId={pendingInviteId} inviteInfo={inviteInfo} />;
+  }
+
+  if (households.length === 0 && myPendingInvites.length > 0) {
+    return (
+      <PendingInviteScreen
+        viewportH={viewportH} invites={myPendingInvites}
+        onAccept={acceptMyPendingInvite} onCreateOwn={dismissMyPendingInvites} onLogout={logout}
+        dbError={dbError} onDismissError={() => setDbError(null)}
+      />
+    );
   }
 
   if (households.length === 0) {
@@ -926,7 +1018,7 @@ function AuthCallbackErrorScreen({ viewportH, error, onDismiss }) {
 // ---------------------------------------------------------------------------
 // Login
 // ---------------------------------------------------------------------------
-function LoginScreen({ viewportH }) {
+function LoginScreen({ viewportH, pendingInviteId, inviteInfo }) {
   const [step, setStep] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -945,6 +1037,15 @@ function LoginScreen({ viewportH }) {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [notConfirmed, setNotConfirmed] = useState(false); // login failed specifically because the account isn't confirmed yet
   const [resendStatus, setResendStatus] = useState(null); // null | "sending" | "sent" | <error message>
+
+  // The invite preview arrives asynchronously (a network round trip after this screen has
+  // already mounted), so pre-fill once it does rather than only at initial render.
+  useEffect(() => {
+    if (inviteInfo?.status === "pending" && inviteInfo.email) {
+      setEmail((v) => v || inviteInfo.email);
+      setSignupEmail((v) => v || inviteInfo.email);
+    }
+  }, [inviteInfo]);
 
   const canSubmit = email.trim().length > 3 && password.length >= 6;
 
@@ -984,9 +1085,15 @@ function LoginScreen({ viewportH }) {
     setSubmitting(true);
     try {
       setRememberMe(rememberMe);
+      // Carries the invite through email confirmation, which can easily happen in a
+      // different tab/browser than this one — bootstrap() picks ?invite= back up from the
+      // URL once a session exists after that redirect and accepts it automatically.
+      const redirectTo = pendingInviteId
+        ? `${getEmailRedirectTo()}/?invite=${encodeURIComponent(pendingInviteId)}`
+        : getEmailRedirectTo();
       const { data, error } = await supabase.auth.signUp({
         email: signupEmail.trim(), password: signupPassword,
-        options: { data: { full_name: signupName.trim() }, emailRedirectTo: getEmailRedirectTo() },
+        options: { data: { full_name: signupName.trim() }, emailRedirectTo: redirectTo },
       });
       if (error) { setAuthError(error.message); return; }
       if (!data.session) setStep("confirm-email");
@@ -1007,6 +1114,31 @@ function LoginScreen({ viewportH }) {
     <div className="flex justify-center" style={{ fontFamily: "-apple-system, sans-serif", minHeight: viewportH, backgroundColor: "#F7F9FB" }}>
       <div className="w-full max-w-[420px] relative overflow-hidden flex flex-col" style={{ height: viewportH, backgroundColor: "#F7F9FB" }}>
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 flex flex-col justify-center">
+          {pendingInviteId && inviteInfo?.status === "pending" && (
+            <div className="rounded-2xl px-4 py-3 mb-5 flex items-center gap-3" style={{ backgroundColor: "rgba(74,127,174,0.08)", border: "1px solid #DCEAF5" }}>
+              <Users size={18} color="#4A7FAE" className="shrink-0" />
+              <p className="text-[12.5px] text-[#3A4048] leading-snug">
+                You've been invited to join <span className="font-semibold">{inviteInfo.householdName}</span> as{" "}
+                <span className="font-semibold">{ROLE_META[inviteInfo.role]?.label || inviteInfo.role}</span>.
+                {step === "login" ? " Log in, or " : " "}
+                {step === "login" && (
+                  <button type="button" onClick={() => setStep("signup")} className="font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    create an account
+                  </button>
+                )}
+                {step === "login" ? " to accept." : "Accept below to join."}
+              </p>
+            </div>
+          )}
+          {pendingInviteId && (inviteInfo?.status === "expired" || inviteInfo?.status === "not_found") && (
+            <div className="rounded-2xl px-4 py-3 mb-5" style={{ backgroundColor: "rgba(198,123,108,0.08)", border: "1px solid rgba(198,123,108,0.3)" }}>
+              <p className="text-[12.5px] text-[#8A4A3D] leading-snug">
+                {inviteInfo.status === "expired"
+                  ? "That invite link has expired. Ask whoever invited you to send a new one."
+                  : "That invite link isn't valid. Ask whoever invited you to send a new one."}
+              </p>
+            </div>
+          )}
           {step === "login" && (
             <div>
               <div className="mb-6 text-center">
@@ -1102,8 +1234,12 @@ function LoginScreen({ viewportH }) {
               <button onClick={() => setStep("login")} className="mb-4" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
                 <ChevronLeft size={20} color="#4A7FAE" />
               </button>
-              <h1 className="font-display text-[24px] text-[#3A4048] mb-1">Create a household</h1>
-              <p className="text-[13px] text-[#8A94A0] mb-5">You'll be the owner — you can invite other caregivers once you're set up.</p>
+              <h1 className="font-display text-[24px] text-[#3A4048] mb-1">{pendingInviteId ? "Create your account" : "Create a household"}</h1>
+              <p className="text-[13px] text-[#8A94A0] mb-5">
+                {pendingInviteId
+                  ? "Confirm your email after signing up and you'll be added straight to the household you were invited to."
+                  : "You'll be the owner — you can invite other caregivers once you're set up."}
+              </p>
 
               <div className="flex flex-col gap-3">
                 <label className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ backgroundColor: "white", border: "1px solid #DCEAF5" }}>
@@ -1146,7 +1282,7 @@ function LoginScreen({ viewportH }) {
                     color: "white",
                   }}
                 >
-                  {submitting ? "Creating…" : "Create household"}
+                  {submitting ? "Creating…" : (pendingInviteId ? "Create account" : "Create household")}
                 </button>
               </div>
               <p className="text-[11px] text-[#B7C3CC] mt-4 leading-relaxed">
@@ -1162,7 +1298,7 @@ function LoginScreen({ viewportH }) {
               </div>
               <h1 className="font-display text-[22px] text-[#3A4048] mb-2">Check your email</h1>
               <p className="text-[13px] text-[#8A94A0] mb-6">
-                We sent a confirmation link to <span className="font-semibold text-[#3A4048]">{signupEmail.trim()}</span>. Click it, then log in below.
+                We sent a confirmation link to <span className="font-semibold text-[#3A4048]">{signupEmail.trim()}</span>. Click it{pendingInviteId ? " and you'll be added to the household automatically" : ", then log in below"}.
               </p>
               {resendStatus === "sent" ? (
                 <p className="text-[12px] font-medium text-[#5FA663] mb-4">New confirmation link sent — check your email.</p>
@@ -1186,6 +1322,75 @@ function LoginScreen({ viewportH }) {
             Do not ship literal "encrypted" / "never leaves this device" claims until a real security
             review confirms they're true — false security claims are a real liability, not just copy. */}
         <p className="text-center text-[11px] text-[#B7C3CC] pb-6">This is an early preview — not yet reviewed for production security</p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pending invite (no link involved) — shown once authed, in place of
+// CreateHouseholdScreen, when this account has no household of its own but does have an
+// invite waiting for it (found by email, not by a link — see getMyPendingInvites). Unlike
+// the direct-link flow (which auto-accepts with no prompt, since clicking the link is
+// itself the confirmation), this always asks first: arriving here didn't involve clicking
+// anything invite-specific, so silently dropping them into someone else's household would
+// be surprising.
+// ---------------------------------------------------------------------------
+function PendingInviteScreen({ viewportH, invites, onAccept, onCreateOwn, onLogout, dbError, onDismissError }) {
+  const [acceptingId, setAcceptingId] = useState(null);
+
+  const accept = async (id) => {
+    setAcceptingId(id);
+    try {
+      await onAccept(id);
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
+  return (
+    <div className="flex justify-center" style={{ fontFamily: "-apple-system, sans-serif", minHeight: viewportH, backgroundColor: "#F7F9FB" }}>
+      <div className="w-full max-w-[420px] relative overflow-hidden flex flex-col" style={{ height: viewportH, backgroundColor: "#F7F9FB" }}>
+        {dbError && (
+          <button onClick={onDismissError} className="flex items-center gap-2 px-4 py-2 shrink-0 text-left" style={{ backgroundColor: "#C67B6C", WebkitAppearance: "none" }}>
+            <AlertTriangle size={14} color="white" className="shrink-0" />
+            <span className="text-[12px] font-semibold text-white flex-1">{dbError}</span>
+            <X size={14} color="white" className="shrink-0" />
+          </button>
+        )}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 flex flex-col justify-center">
+          <div className="mb-6 text-center">
+            <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: "rgba(74,127,174,0.12)" }}>
+              <Users size={24} color="#4A7FAE" />
+            </div>
+            <h1 className="font-display text-[24px] text-[#3A4048] mb-1">
+              {invites.length === 1 ? "You've been invited" : `You've been invited to ${invites.length} households`}
+            </h1>
+            <p className="text-[13px] text-[#8A94A0]">Accept to join, or create your own household instead.</p>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {invites.map((inv) => (
+              <div key={inv.id} className="rounded-2xl p-4 flex items-center gap-3" style={{ backgroundColor: "white", border: "1px solid #DCEAF5" }}>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-semibold text-[#3A4048] truncate">{inv.householdName}</p>
+                  <p className="text-[12px] text-[#8A94A0]">as {ROLE_META[inv.role]?.label || inv.role}{inv.relation ? ` · ${inv.relation}` : ""}</p>
+                </div>
+                <button onClick={() => accept(inv.id)} disabled={acceptingId === inv.id} className="rounded-xl py-2 px-4 font-semibold text-[13px] shrink-0"
+                  style={{ WebkitAppearance: "none", backgroundColor: acceptingId === inv.id ? "#C4CDD6" : "#4A7FAE", color: "white" }}>
+                  {acceptingId === inv.id ? "Joining…" : "Accept"}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button type="button" onClick={onCreateOwn} className="block mx-auto mt-6 text-[13px] font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+            Create your own household instead
+          </button>
+          <button type="button" onClick={onLogout} className="flex items-center justify-center gap-1.5 mx-auto mt-4 text-[13px] font-medium text-[#8A94A0]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+            <LogOut size={14} /> Log out
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2475,6 +2680,8 @@ function HouseholdScreen({ household, persistHousehold, addChild, editChild, del
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRelation, setInviteRelation] = useState("");
   const [inviteRole, setInviteRole] = useState("view");
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [resendingInviteId, setResendingInviteId] = useState(null);
   const [childOpen, setChildOpen] = useState(false);
   const [childName, setChildName] = useState("");
   const [childAge, setChildAge] = useState("");
@@ -2533,10 +2740,36 @@ function HouseholdScreen({ household, persistHousehold, addChild, editChild, del
   };
 
   const sendInvite = async () => {
-    if (!inviteEmail.trim()) return;
-    const next = { ...household, invites: [...household.invites, { id: uid(), email: inviteEmail.trim(), relation: inviteRelation.trim() || "Caregiver", role: inviteRole }] };
-    await persistHousehold(next);
-    setInviteEmail(""); setInviteRelation(""); setInviteRole("view"); setInviteOpen(false);
+    if (!inviteEmail.trim() || sendingInvite) return;
+    setSendingInvite(true);
+    try {
+      const inviteId = uid();
+      const next = { ...household, invites: [...household.invites, { id: inviteId, email: inviteEmail.trim(), relation: inviteRelation.trim() || "Caregiver", role: inviteRole }] };
+      await persistHousehold(next);
+      try {
+        await sendInviteEmail(inviteId);
+      } catch (e) {
+        // The invite itself was created fine — it just didn't get emailed. It's still
+        // usable (and resendable from the Pending list below), so this isn't fatal.
+        console.error("sendInviteEmail failed", e);
+        alert(`Invite created, but the email couldn't be sent: ${e.message || "unknown error"}. You can retry from the Pending list.`);
+      }
+      setInviteEmail(""); setInviteRelation(""); setInviteRole("view"); setInviteOpen(false);
+    } finally {
+      setSendingInvite(false);
+    }
+  };
+
+  const resendInvite = async (inviteId) => {
+    setResendingInviteId(inviteId);
+    try {
+      await sendInviteEmail(inviteId);
+    } catch (e) {
+      console.error("resendInvite failed", e);
+      alert(e.message || "Couldn't resend that invite.");
+    } finally {
+      setResendingInviteId(null);
+    }
   };
 
   const acceptInvite = async (inviteId) => {
@@ -2722,15 +2955,22 @@ function HouseholdScreen({ household, persistHousehold, addChild, editChild, del
         <>
           <div className="px-6 mb-2"><p className="text-[12px] font-semibold tracking-wide uppercase text-[#8A94A0]">Pending</p></div>
           <div className="mx-5 rounded-3xl overflow-hidden mb-6" style={{ backgroundColor: "white", border: "1px dashed #C9D8E6" }}>
-            {household.invites.map((p, i, arr) => {
-              const Row = canWrite ? "button" : "div";
-              return (
-                <Row key={p.id} onClick={canWrite ? () => acceptInvite(p.id) : undefined} className="w-full flex items-center gap-3 px-4 py-3" style={{ borderBottom: i < arr.length - 1 ? "1px solid #EEF3F7" : "none", backgroundColor: "white", WebkitAppearance: "none" }}>
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: "#F2F7FB" }}><Mail size={15} color="#8A94A0" /></div>
-                  <div className="min-w-0 flex-1 text-left"><p className="text-[14px] text-[#3A4048] font-semibold truncate">{p.email}</p><p className="text-[12px] text-[#8A94A0] truncate">Invited as {p.relation} · {ROLE_META[p.role || "view"].label}{canWrite ? " · tap to mark accepted" : ""}</p></div>
-                </Row>
-              );
-            })}
+            {household.invites.map((p, i, arr) => (
+              <div key={p.id} className="w-full flex items-center gap-2 px-4 py-3" style={{ borderBottom: i < arr.length - 1 ? "1px solid #EEF3F7" : "none", backgroundColor: "white" }}>
+                <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: "#F2F7FB" }}><Mail size={15} color="#8A94A0" /></div>
+                <button type="button" onClick={canWrite ? () => acceptInvite(p.id) : undefined} disabled={!canWrite}
+                  className="min-w-0 flex-1 text-left" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                  <p className="text-[14px] text-[#3A4048] font-semibold truncate">{p.email}</p>
+                  <p className="text-[12px] text-[#8A94A0] truncate">Invited as {p.relation} · {ROLE_META[p.role || "view"].label}{canWrite ? " · tap to mark accepted" : ""}</p>
+                </button>
+                {canWrite && (
+                  <button type="button" onClick={() => resendInvite(p.id)} disabled={resendingInviteId === p.id}
+                    className="shrink-0 text-[12px] font-semibold text-[#4A7FAE] px-2 py-1" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    {resendingInviteId === p.id ? "Sending…" : "Resend"}
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </>
       )}
@@ -2770,7 +3010,10 @@ function HouseholdScreen({ household, persistHousehold, addChild, editChild, del
               })}
             </div>
             <div className="flex gap-2">
-              <button onClick={sendInvite} className="flex-1 rounded-xl py-2.5 font-semibold text-[14px]" style={{ backgroundColor: "#4A7FAE", color: "white", WebkitAppearance: "none" }}>Send invite</button>
+              <button onClick={sendInvite} disabled={sendingInvite || !inviteEmail.trim()} className="flex-1 rounded-xl py-2.5 font-semibold text-[14px]"
+                style={{ backgroundColor: sendingInvite || !inviteEmail.trim() ? "#C4CDD6" : "#4A7FAE", color: "white", WebkitAppearance: "none" }}>
+                {sendingInvite ? "Sending…" : "Send invite"}
+              </button>
               <button onClick={() => { setInviteOpen(false); setInviteEmail(""); setInviteRelation(""); setInviteRole("view"); }} className="rounded-xl py-2.5 px-4 font-semibold text-[14px]" style={{ backgroundColor: "#F2F7FB", color: "#8A94A0", WebkitAppearance: "none" }}>Cancel</button>
             </div>
           </div>
