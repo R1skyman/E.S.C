@@ -1671,6 +1671,24 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
   const trackRef = useRef(null);
   const widthRef = useRef(390);
   const drag = useRef({ x: 0, y: 0, active: false, horizontal: null });
+  const [, forceMeasure] = useState(0); // re-render once real width is known, so first paint isn't offset
+
+  // Measure the real track width on mount/resize, not just drag-start — otherwise the
+  // initial transform uses the hardcoded 390px fallback and the view sits shifted
+  // until the first swipe self-corrects it.
+  useEffect(() => {
+    const measure = () => {
+      const w = trackRef.current?.offsetWidth;
+      if (w && w !== widthRef.current) {
+        widthRef.current = w;
+        forceMeasure((n) => n + 1);
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
 
   useEffect(() => { setSearch(""); setFilter("all"); setSelected(null); }, [childId]);
 
