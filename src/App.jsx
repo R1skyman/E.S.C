@@ -2772,6 +2772,12 @@ function HouseholdScreen({ household, persistHousehold, addChild, editChild, del
     }
   };
 
+  const cancelInvite = async (inviteId) => {
+    if (!confirm("Cancel this invite? The link in that email will stop working.")) return;
+    const next = { ...household, invites: household.invites.filter((i) => i.id !== inviteId) };
+    await persistHousehold(next);
+  };
+
   const acceptInvite = async (inviteId) => {
     const inv = household.invites.find((i) => i.id === inviteId);
     if (!inv) return;
@@ -2967,6 +2973,12 @@ function HouseholdScreen({ household, persistHousehold, addChild, editChild, del
                   <button type="button" onClick={() => resendInvite(p.id)} disabled={resendingInviteId === p.id}
                     className="shrink-0 text-[12px] font-semibold text-[#4A7FAE] px-2 py-1" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
                     {resendingInviteId === p.id ? "Sending…" : "Resend"}
+                  </button>
+                )}
+                {canWrite && (
+                  <button type="button" onClick={() => cancelInvite(p.id)}
+                    className="shrink-0 text-[12px] font-semibold text-[#C4685C] px-2 py-1" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    Cancel
                   </button>
                 )}
               </div>
