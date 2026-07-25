@@ -24,4 +24,34 @@ html, body, #root {
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--bg-page);
+}
+
+/* Theme tokens — the light values are the app's original hardcoded palette; dark mode
+   overrides them via [data-theme="dark"] on <html>, toggled from Settings > Accessibility.
+   Category colors, the accent blue, and status colors (success/error/urgency) are left as
+   literal hex throughout the app — they're saturated enough to read on both surfaces and,
+   for categories, are already independently user-customizable via Category Colors. */
+:root {
+  --bg-page: #F7F9FB;
+  --bg-surface: #FFFFFF;
+  --bg-tint: #F2F7FB;
+  --text-primary: #3A4048;
+  --text-secondary: #8A94A0;
+  --text-tertiary: #B7C3CC;
+  --border-default: #DCEAF5;
+  --border-subtle: #EEF3F7;
+  --border-medium: #C4CDD6;
+}
+
+:root[data-theme="dark"] {
+  --bg-page: #14171B;
+  --bg-surface: #1E232A;
+  --bg-tint: #232A33;
+  --text-primary: #E8EBEE;
+  --text-secondary: #99A3AF;
+  --text-tertiary: #6B7480;
+  --border-default: #2A323C;
+  --border-subtle: #232830;
+  --border-medium: #454E58;
 }
