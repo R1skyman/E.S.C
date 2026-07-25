@@ -3531,15 +3531,37 @@ function ChangePasswordSubpage({ onBack }) {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNext, setShowNext] = useState(false);
 
   const mismatch = confirm.length > 0 && next !== confirm;
-  const canSave = current.length > 0 && next.length >= 6 && next === confirm;
+  const canSave = current.length > 0 && next.length >= 6 && next === confirm && !saving;
 
-  const save = () => {
+  const save = async () => {
     if (!canSave) return;
-    setSaved(true);
+    setSaving(true);
+    setError(null);
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user?.email) throw new Error("Couldn't verify your account. Try logging in again.");
+
+      // Re-authenticate with the entered "current" password before changing anything —
+      // updateUser() alone would happily change the password on an already-open session
+      // without ever checking it, which defeats the point of asking for it.
+      const { error: reauthErr } = await supabase.auth.signInWithPassword({ email: userData.user.email, password: current });
+      if (reauthErr) throw new Error("Current password is incorrect.");
+
+      const { error: updateErr } = await supabase.auth.updateUser({ password: next });
+      if (updateErr) throw new Error(updateErr.message);
+
+      setSaved(true);
+    } catch (e) {
+      setError(e.message || "Couldn't update your password.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (saved) {
@@ -3594,17 +3616,14 @@ function ChangePasswordSubpage({ onBack }) {
         </div>
       </div>
 
+      {error && <p className="mx-5 mb-3 text-[12.5px] text-[#C67B6C]">{error}</p>}
+
       <div className="mx-5">
         <button onClick={save} disabled={!canSave} className="w-full box-border rounded-2xl py-3.5 font-semibold text-[15px]"
           style={{ WebkitAppearance: "none", backgroundColor: canSave ? "#4A7FAE" : "#C4CDD6", color: "white" }}>
-          Save new password
+          {saving ? "Saving…" : "Save new password"}
         </button>
       </div>
-
-      <p className="px-6 mt-4 text-[11px] text-[#B7C3CC] leading-relaxed">
-        This is a preview build — there's no real account behind it yet, so your current password isn't actually verified here. Once real
-        authentication is in place, this same screen will check it for real before allowing a change.
-      </p>
     </SettingsSubpage>
   );
 }
