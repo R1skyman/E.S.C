@@ -1019,7 +1019,11 @@ function AuthCallbackErrorScreen({ viewportH, error, onDismiss }) {
 // Login
 // ---------------------------------------------------------------------------
 function LoginScreen({ viewportH, pendingInviteId, inviteInfo }) {
-  const [step, setStep] = useState("login");
+  // Arriving via an invite link is far more often a first-time visitor than an existing
+  // account holder, so default straight to signup instead of making them notice and tap a
+  // small "create an account" link on the login form — "Log in instead" is one tap away
+  // either way, for the minority who already have an account.
+  const [step, setStep] = useState(() => (pendingInviteId ? "signup" : "login"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -1120,13 +1124,20 @@ function LoginScreen({ viewportH, pendingInviteId, inviteInfo }) {
               <p className="text-[12.5px] text-[#3A4048] leading-snug">
                 You've been invited to join <span className="font-semibold">{inviteInfo.householdName}</span> as{" "}
                 <span className="font-semibold">{ROLE_META[inviteInfo.role]?.label || inviteInfo.role}</span>.
-                {step === "login" ? " Log in, or " : " "}
+                {step === "login" && " Log in, or "}
                 {step === "login" && (
                   <button type="button" onClick={() => setStep("signup")} className="font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
                     create an account
                   </button>
                 )}
-                {step === "login" ? " to accept." : "Accept below to join."}
+                {step === "login" && " to accept."}
+                {step === "signup" && " New here? Fill in your details below to accept — or "}
+                {step === "signup" && (
+                  <button type="button" onClick={() => setStep("login")} className="font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    log in instead
+                  </button>
+                )}
+                {step === "signup" && " if you already have an account."}
               </p>
             </div>
           )}
@@ -2261,7 +2272,8 @@ function InfoBankScreen({ infoBank, persistInfoBank, myRole, onBack, households,
   if (!activeCategory) {
     return (
       <div>
-        <div className="px-6 pt-8 pb-5 text-center">
+        <div className="px-6 pt-8 pb-5 relative text-center">
+          <button onClick={onBack} className="absolute left-6 top-8" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}><ChevronLeft size={20} color="#4A7FAE" /></button>
           <p className="text-[12px] font-semibold tracking-wide uppercase text-[#8A94A0]">Reference</p>
           <h1 className="font-display text-[24px] text-[#3A4048]">Info Bank</h1>
         </div>
