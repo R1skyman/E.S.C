@@ -56,3 +56,24 @@ export function time24hToDisplay(hhmm) {
   d.setHours(h, m, 0, 0);
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
+
+// "9:00 AM" + "10:30 AM" -> "9:00 AM – 10:30 AM"; falls back to just the start time when
+// there's no end time, so every call site can use this instead of branching itself.
+export function formatTimeRange(time, endTime) {
+  return endTime ? `${time} – ${endTime}` : time;
+}
+
+// Minutes between two display-formatted times ("9:00 AM", "10:30 AM"), e.g. "1h 30m". Assumes
+// the end is the next occurrence of that clock time at or after the start — so an entry
+// spanning midnight (e.g. 11 PM to 1 AM) still comes out positive instead of negative.
+export function formatDuration(time, endTime) {
+  if (!endTime) return "";
+  const [sh, sm] = timeDisplayTo24h(time).split(":").map(Number);
+  const [eh, em] = timeDisplayTo24h(endTime).split(":").map(Number);
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (mins <= 0) mins += 24 * 60;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}

@@ -41,7 +41,7 @@ function careItemFromRow(row) {
 }
 
 function timelineEntryFromRow(row) {
-  return { id: row.id, time: row.time, date: row.day_key, category: row.category, title: row.title, subtitle: row.subtitle || "", loggedBy: row.logged_by || "" };
+  return { id: row.id, time: row.time, endTime: row.end_time || "", date: row.day_key, category: row.category, title: row.title, subtitle: row.subtitle || "", loggedBy: row.logged_by || "" };
 }
 
 function upcomingFromRow(row) {
@@ -272,7 +272,7 @@ export async function replaceTimelineDay(childId, dayKey, entries) {
   throwIfError((await supabase.from("timeline_entries").delete().eq("child_id", childId).eq("day_key", dayKey)).error);
   if (entries.length === 0) return;
   const rows = entries.map((e) => ({
-    id: e.id, child_id: childId, day_key: dayKey, time: e.time, category: e.category, title: e.title,
+    id: e.id, child_id: childId, day_key: dayKey, time: e.time, end_time: e.endTime || null, category: e.category, title: e.title,
     subtitle: e.subtitle || "", logged_by: e.loggedBy || "",
   }));
   throwIfError((await supabase.from("timeline_entries").upsert(rows)).error);

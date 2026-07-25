@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { CATEGORY_META, DEFAULT_CATEGORY_COLORS, COLORBLIND_PALETTE, ROLE_META, DEFAULT_HOUSEHOLDS, URGENCY_RED_MS, URGENCY_YELLOW_MS } from "./constants.js";
 import { getStatus, fmtCountdown, fmtElapsed } from "./utils/status.js";
-import { dateKey, addDays, formatTimeForSpeech, nextOccurrence, formatEntryDate, timeDisplayTo24h, time24hToDisplay } from "./utils/dateHelpers.js";
+import { dateKey, addDays, formatTimeForSpeech, nextOccurrence, formatEntryDate, timeDisplayTo24h, time24hToDisplay, formatTimeRange, formatDuration } from "./utils/dateHelpers.js";
 import { uid, formatPhoneInput, buildHistorySummary, hoursToUnitDefault } from "./utils/misc.js";
 import { supabase, getRememberMe, setRememberMe, getEmailRedirectTo } from "./utils/supabase.js";
 import {
@@ -696,11 +696,11 @@ export default function App() {
   // targetDayKey lets this log to whatever day is actually being viewed (e.g. backfilling a
   // past day from the Timeline), not just today. If trackGoing is set, it also creates a new
   // recurring care item — only meaningful for today, since it resets a live countdown from now.
-  const logFreeform = useCallback(async (cid, { category, title, subtitle, time, timestamp, trackGoing, timingModel, intervalHours, minGapHours }, targetDayKey) => {
+  const logFreeform = useCallback(async (cid, { category, title, subtitle, time, endTime, timestamp, trackGoing, timingModel, intervalHours, minGapHours }, targetDayKey) => {
     const day = targetDayKey || dateKey(new Date());
     const tl = timeline[cid] || {};
     const dayEntries = tl[day] || [];
-    const entry = { id: uid(), time, date: day, category, title, subtitle, loggedBy: household.members.find((m) => m.isYou)?.name || "You" };
+    const entry = { id: uid(), time, endTime: endTime || "", date: day, category, title, subtitle, loggedBy: household.members.find((m) => m.isYou)?.name || "You" };
     const nextTl = { ...tl, [day]: [...dayEntries, entry] };
     await persistTimeline(cid, nextTl);
 
@@ -1609,7 +1609,7 @@ function TodayScreen({ household, childId, setChildId, careItems, timeline, upco
               </div>
               <div className="min-w-0 flex-1"><p className="text-[14px] text-[#3A4048] font-semibold truncate">{e.title}</p><p className="text-[12px] text-[#8A94A0] truncate">{e.subtitle}</p></div>
               <div className="flex items-center gap-2 shrink-0">
-                <p className="tnum text-[13px] text-[#8A94A0] font-medium">{e.time}</p>
+                <p className="tnum text-[13px] text-[#8A94A0] font-medium">{formatTimeRange(e.time, e.endTime)}</p>
                 <ChevRight size={14} color="#C4CDD6" />
               </div>
             </button>
@@ -1865,7 +1865,7 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
                   <p className="text-[14px] text-[#3A4048] font-semibold truncate">{e.title}</p>
                   <p className="text-[12px] text-[#8A94A0] truncate">{formatEntryDate(e.dayKey)} · {e.subtitle}</p>
                 </div>
-                <p className="tnum text-[12px] text-[#8A94A0] font-medium shrink-0">{e.time}</p>
+                <p className="tnum text-[12px] text-[#8A94A0] font-medium shrink-0">{formatTimeRange(e.time, e.endTime)}</p>
               </button>
             );
           })}
@@ -1918,7 +1918,7 @@ function DayCard({ offset, entries, onSelect }) {
                 <p className="text-[14px] text-[#3A4048] font-semibold truncate">{e.title}</p>
                 <p className="text-[12px] text-[#8A94A0] truncate">{e.subtitle}</p>
               </div>
-              <p className="tnum text-[12px] text-[#8A94A0] font-medium shrink-0">{e.time}</p>
+              <p className="tnum text-[12px] text-[#8A94A0] font-medium shrink-0">{formatTimeRange(e.time, e.endTime)}</p>
               <ChevRight size={14} color="#C4CDD6" className="shrink-0" />
             </button>
           );
@@ -2088,6 +2088,7 @@ function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText 
   const [title, setTitle] = useState(entry.title);
   const [subtitle, setSubtitle] = useState(entry.subtitle || "");
   const [time, setTime] = useState(() => timeDisplayTo24h(entry.time));
+  const [endTime, setEndTime] = useState(() => (entry.endTime ? timeDisplayTo24h(entry.endTime) : ""));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const canWrite = myRole !== "view";
 
@@ -2097,7 +2098,7 @@ function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText 
 
   const save = () => {
     if (!canSave) return;
-    onSave({ category, title: title.trim(), subtitle: subtitle.trim(), time: time24hToDisplay(time) });
+    onSave({ category, title: title.trim(), subtitle: subtitle.trim(), time: time24hToDisplay(time), endTime: endTime ? time24hToDisplay(endTime) : "" });
   };
 
   return (
@@ -2131,8 +2132,14 @@ function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText 
               </div>
               <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid #EEF3F7" }}>
                 <span className="text-[12px] text-[#8A94A0]">Time</span>
-                <span className="tnum text-[13px] font-medium text-[#3A4048]">{entry.time}</span>
+                <span className="tnum text-[13px] font-medium text-[#3A4048]">{formatTimeRange(entry.time, entry.endTime)}</span>
               </div>
+              {entry.endTime && (
+                <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid #EEF3F7" }}>
+                  <span className="text-[12px] text-[#8A94A0]">Duration</span>
+                  <span className="tnum text-[13px] font-medium text-[#3A4048]">{formatDuration(entry.time, entry.endTime)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-[12px] text-[#8A94A0]">Logged by</span>
                 <span className="text-[13px] font-medium text-[#3A4048]">{entry.loggedBy || "Unknown"}</span>
@@ -2185,6 +2192,18 @@ function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText 
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8A94A0] mb-1.5">Time</p>
               <input type="time" value={time} onChange={(e) => { setTime(e.target.value); speakText?.(`Time set to ${formatTimeForSpeech(e.target.value)}`); }}
                 className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[#3A4048]" style={{ border: "1px solid #DCEAF5", WebkitAppearance: "none" }} />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8A94A0] mb-1.5">End time (optional)</p>
+              <div className="flex items-center gap-2">
+                <input type="time" value={endTime} onChange={(e) => { setEndTime(e.target.value); if (e.target.value) speakText?.(`End time set to ${formatTimeForSpeech(e.target.value)}`); }}
+                  className="flex-1 text-[14px] px-3 py-2.5 rounded-xl text-[#3A4048]" style={{ border: "1px solid #DCEAF5", WebkitAppearance: "none" }} />
+                {endTime && (
+                  <button onClick={() => setEndTime("")} className="text-[12px] font-semibold text-[#8A94A0] px-2 py-1" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flex gap-2 mt-1">
               <button onClick={save} disabled={!canSave} className="flex-1 rounded-2xl py-3 font-semibold text-[14px]"
@@ -3832,6 +3851,7 @@ function QuickLogModal({ kids, activeChildId, items, now, onLog, onAddFreeform, 
     const d = new Date();
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   });
+  const [endTime, setEndTime] = useState("");
   const [trackGoing, setTrackGoing] = useState(false);
   const [timingModel, setTimingModel] = useState("asNeeded");
   const [intervalHours, setIntervalHours] = useState("");
@@ -3877,7 +3897,7 @@ function QuickLogModal({ kids, activeChildId, items, now, onLog, onAddFreeform, 
     const minGapHoursFinal = minGapUnit === "minutes" ? Number(minGapHours) / 60 : Number(minGapHours);
     onAddFreeform(selectedKids, {
       category, title: title.trim(), subtitle: subtitle.trim() || CATEGORY_META[category].label,
-      time: fmtTimeLabel(time), timestamp: timeToTimestamp(time), trackGoing: isToday && trackGoing, timingModel,
+      time: fmtTimeLabel(time), endTime: endTime ? fmtTimeLabel(endTime) : "", timestamp: timeToTimestamp(time), trackGoing: isToday && trackGoing, timingModel,
       intervalHours: intervalHoursFinal, minGapHours: minGapHoursFinal,
     });
   };
@@ -4003,6 +4023,19 @@ function QuickLogModal({ kids, activeChildId, items, now, onLog, onAddFreeform, 
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8A94A0] mb-1.5">Time</p>
               <input type="time" value={time} onChange={(e) => { setTime(e.target.value); speakText?.(`Time set to ${formatTimeForSpeech(e.target.value)}`); }}
                 className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[#3A4048]" style={{ border: "1px solid #DCEAF5", WebkitAppearance: "none" }} />
+            </div>
+
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8A94A0] mb-1.5">End time (optional)</p>
+              <div className="flex items-center gap-2">
+                <input type="time" value={endTime} onChange={(e) => { setEndTime(e.target.value); if (e.target.value) speakText?.(`End time set to ${formatTimeForSpeech(e.target.value)}`); }}
+                  className="flex-1 text-[14px] px-3 py-2.5 rounded-xl text-[#3A4048]" style={{ border: "1px solid #DCEAF5", WebkitAppearance: "none" }} />
+                {endTime && (
+                  <button onClick={() => setEndTime("")} className="text-[12px] font-semibold text-[#8A94A0] px-2 py-1" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
 
             {isToday && (
