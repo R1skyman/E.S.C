@@ -2164,6 +2164,13 @@ function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText 
               </div>
             </div>
 
+            {category === "incidents" && entry.subtitle && (
+              <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: "var(--bg-page)", border: "1px solid var(--border-subtle)" }}>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5">Notes</p>
+                <p className="text-[13.5px] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap">{entry.subtitle}</p>
+              </div>
+            )}
+
             {canWrite ? (
               !confirmDelete ? (
                 <div className="flex gap-2">
@@ -2202,9 +2209,17 @@ function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText 
                 className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[var(--text-primary)]" style={{ border: "1px solid var(--border-default)", WebkitAppearance: "none" }} />
             </div>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5">Details</p>
-              <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)}
-                className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[var(--text-primary)]" style={{ border: "1px solid var(--border-default)", WebkitAppearance: "none" }} />
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5">
+                {category === "incidents" ? "Notes" : "Details"}
+              </p>
+              {category === "incidents" ? (
+                <textarea value={subtitle} onChange={(e) => setSubtitle(e.target.value)} rows={3}
+                  placeholder="What led up to it, how it was resolved, anything a doctor or teacher should know"
+                  className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[var(--text-primary)] resize-none" style={{ border: "1px solid var(--border-default)", WebkitAppearance: "none" }} />
+              ) : (
+                <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)}
+                  className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[var(--text-primary)]" style={{ border: "1px solid var(--border-default)", WebkitAppearance: "none" }} />
+              )}
             </div>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5">Time</p>
@@ -4044,9 +4059,17 @@ function QuickLogModal({ kids, activeChildId, items, now, onLog, onAddFreeform, 
             </div>
 
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5">Details (optional)</p>
-              <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="e.g. 5 mL, Room 4B, loud noise trigger"
-                className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[var(--text-primary)]" style={{ border: "1px solid var(--border-default)", WebkitAppearance: "none" }} />
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5">
+                {category === "incidents" ? "Notes (optional)" : "Details (optional)"}
+              </p>
+              {category === "incidents" ? (
+                <textarea value={subtitle} onChange={(e) => setSubtitle(e.target.value)} rows={3}
+                  placeholder="What led up to it, how it was resolved, anything a doctor or teacher should know"
+                  className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[var(--text-primary)] resize-none" style={{ border: "1px solid var(--border-default)", WebkitAppearance: "none" }} />
+              ) : (
+                <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="e.g. 5 mL, Room 4B, loud noise trigger"
+                  className="w-full text-[14px] px-3 py-2.5 rounded-xl text-[var(--text-primary)]" style={{ border: "1px solid var(--border-default)", WebkitAppearance: "none" }} />
+              )}
             </div>
 
             <div>

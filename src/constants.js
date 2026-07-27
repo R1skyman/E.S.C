@@ -1,5 +1,5 @@
 import {
-  Pill, Utensils, Wind, HeartPulse, GraduationCap, Moon, CalendarDays, Sparkles,
+  Pill, Utensils, Wind, HeartPulse, GraduationCap, Moon, CalendarDays, Sparkles, Zap,
   Crown, Shield, Eye as EyeIcon,
 } from "lucide-react";
 
@@ -12,6 +12,7 @@ export const CATEGORY_META = {
   school: { label: "School", icon: GraduationCap, color: "#4A96A3" },
   appointment: { label: "Appointment", icon: CalendarDays, color: "#C97B5A" },
   activity: { label: "Activity", icon: Sparkles, color: "#7A9E5C" },
+  incidents: { label: "Incidents", icon: Zap, color: "#B94A42" },
 };
 
 // A frozen snapshot of the original design-system colors, taken before any user override is ever
@@ -21,9 +22,12 @@ export const DEFAULT_CATEGORY_COLORS = Object.fromEntries(Object.entries(CATEGOR
 // Based on the Okabe–Ito palette (Okabe & Ito, "Color Universal Design", 2008), one of the most
 // widely-used colorblind-safe palettes — adapted slightly (a darker gold instead of pure yellow,
 // a dark gray instead of pure black) since these render as thin icon strokes on a white background.
+// Okabe–Ito only defines 8 colors; incidents (a 9th category) uses a dark wine tone chosen for
+// maximum distance from the reddish-purple already assigned to therapy.
 export const COLORBLIND_PALETTE = {
   medication: "#0072B2", meal: "#E69F00", sensory: "#009E73", therapy: "#CC79A7",
   sleep: "#56B4E9", school: "#D55E00", appointment: "#B8860B", activity: "#595959",
+  incidents: "#7A2048",
 };
 
 export const ROLE_META = {
