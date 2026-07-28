@@ -57,6 +57,20 @@ export function time24hToDisplay(hhmm) {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+// Minutes since midnight from a display-formatted time ("9:00 AM" -> 540), for sorting.
+export function timeToMinutes(display) {
+  const [h, m] = timeDisplayTo24h(display).split(":").map(Number);
+  return h * 60 + m;
+}
+
+// A day's entries only ever land in the array in whatever order they were logged in — which
+// isn't chronological once anything is backfilled to an earlier time than what's already there
+// (see logFreeform's targetDayKey). Sorts by each entry's actual time instead, most recent
+// first, matching the convention already used for the Timeline search results.
+export function sortEntriesByTime(entries) {
+  return [...entries].sort((a, b) => timeToMinutes(b.time) - timeToMinutes(a.time));
+}
+
 // "9:00 AM" + "10:30 AM" -> "9:00 AM – 10:30 AM"; falls back to just the start time when
 // there's no end time, so every call site can use this instead of branching itself.
 export function formatTimeRange(time, endTime) {

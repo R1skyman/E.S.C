@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { CATEGORY_META, DEFAULT_CATEGORY_COLORS, COLORBLIND_PALETTE, ROLE_META, DEFAULT_HOUSEHOLDS, URGENCY_RED_MS, URGENCY_YELLOW_MS } from "./constants.js";
 import { getStatus, fmtCountdown, fmtElapsed } from "./utils/status.js";
-import { dateKey, addDays, formatTimeForSpeech, nextOccurrence, formatEntryDate, timeDisplayTo24h, time24hToDisplay, formatTimeRange, formatDuration } from "./utils/dateHelpers.js";
+import { dateKey, addDays, formatTimeForSpeech, nextOccurrence, formatEntryDate, timeDisplayTo24h, time24hToDisplay, formatTimeRange, formatDuration, timeToMinutes, sortEntriesByTime } from "./utils/dateHelpers.js";
 import { uid, formatPhoneInput, buildHistorySummary, hoursToUnitDefault } from "./utils/misc.js";
 import { supabase, getRememberMe, setRememberMe, getEmailRedirectTo } from "./utils/supabase.js";
 import {
@@ -1506,7 +1506,7 @@ function TodayScreen({ household, childId, setChildId, careItems, timeline, upco
   const visible = base.filter(({ item }) => filter === "all" || item.category === filter).sort((a, b) => a.status.remaining - b.status.remaining);
 
   const today = dateKey(new Date());
-  const todayEntries = (timeline[today] || []).slice(-3).reverse();
+  const todayEntries = sortEntriesByTime(timeline[today] || []).slice(0, 3);
 
   return (
     <div>
@@ -1717,7 +1717,10 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
         .flatMap(([dayKey, entries]) => entries.map((e) => ({ ...e, dayKey })))
         .filter((e) => filter === "all" || e.category === filter)
         .filter((e) => !q || e.title.toLowerCase().includes(q) || (e.subtitle || "").toLowerCase().includes(q))
-        .sort((a, b) => (a.dayKey < b.dayKey ? 1 : a.dayKey > b.dayKey ? -1 : 0)) // most recent first
+        .sort((a, b) => {
+          if (a.dayKey !== b.dayKey) return a.dayKey < b.dayKey ? 1 : -1; // most recent day first
+          return timeToMinutes(b.time) - timeToMinutes(a.time); // then most recent time first within that day
+        })
     : [];
 
   if (household.children.length === 0) {
@@ -1893,7 +1896,7 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
           <div className="flex" style={trackStyle}>
             {pages.map((offset) => (
               <div key={offset} className="w-full shrink-0 px-5" style={{ width: "100%" }}>
-                <DayCard offset={offset} entries={timeline[dateKey(addDays(new Date(), offset))] || []}
+                <DayCard offset={offset} entries={sortEntriesByTime(timeline[dateKey(addDays(new Date(), offset))] || [])}
                   onSelect={(entry) => setSelected({ dayKey: dateKey(addDays(new Date(), offset)), entry })} />
               </div>
             ))}
