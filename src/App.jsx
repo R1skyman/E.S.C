@@ -4,7 +4,7 @@ import {
   ArrowRight, Check, Plus, Home, CalendarDays, Users, ChevronLeft,
   ChevronRight, Calendar, ChevronRight as ChevRight, X,
   MoreHorizontal, Settings as SettingsIcon, User, Bell, LogOut, HelpCircle, BookOpen, FolderKanban, ShieldCheck, RefreshCw, Phone, AlertTriangle, Activity, Search, MapPin, Pencil,
-  Link as LinkIcon, WifiOff, Share2, Copy, BellRing, Palette, Volume2,
+  Link as LinkIcon, WifiOff, Share2, Copy, BellRing, Palette, Volume2, FileText, ScrollText,
 } from "lucide-react";
 import { CATEGORY_META, DEFAULT_CATEGORY_COLORS, COLORBLIND_PALETTE, ROLE_META, DEFAULT_HOUSEHOLDS, URGENCY_RED_MS, URGENCY_YELLOW_MS } from "./constants.js";
 import { getStatus, fmtCountdown, fmtElapsed } from "./utils/status.js";
@@ -1279,15 +1279,20 @@ function LoginScreen({ viewportH, pendingInviteId, inviteInfo }) {
                   </button>
                 </label>
 
-                <button type="button" onClick={() => setAgreedToTerms((v) => !v)} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl text-left"
-                  style={{ backgroundColor: agreedToTerms ? "rgba(74,127,174,0.08)" : "var(--bg-surface)", border: `1px solid ${agreedToTerms ? "#4A7FAE" : "var(--border-default)"}`, WebkitAppearance: "none" }}>
-                  <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ border: `1.5px solid ${agreedToTerms ? "#4A7FAE" : "var(--border-medium)"}`, backgroundColor: agreedToTerms ? "#4A7FAE" : "var(--bg-surface)" }}>
-                    {agreedToTerms && <Check size={13} color="white" />}
-                  </div>
+                <div className="w-full flex items-start gap-2.5 px-3.5 py-3 rounded-2xl text-left"
+                  style={{ backgroundColor: agreedToTerms ? "rgba(74,127,174,0.08)" : "var(--bg-surface)", border: `1px solid ${agreedToTerms ? "#4A7FAE" : "var(--border-default)"}` }}>
+                  <button type="button" onClick={() => setAgreedToTerms((v) => !v)} className="shrink-0" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                    <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ border: `1.5px solid ${agreedToTerms ? "#4A7FAE" : "var(--border-medium)"}`, backgroundColor: agreedToTerms ? "#4A7FAE" : "var(--bg-surface)" }}>
+                      {agreedToTerms && <Check size={13} color="white" />}
+                    </div>
+                  </button>
                   <span className="text-[13px] text-[var(--text-primary)] leading-snug">
-                    I agree to the <span className="font-semibold text-[#4A7FAE]">Terms of Service</span> and <span className="font-semibold text-[#4A7FAE]">Privacy Policy</span>
+                    I agree to the{" "}
+                    <button type="button" onClick={() => setStep("terms")} className="font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>Terms of Service</button>
+                    {" "}and{" "}
+                    <button type="button" onClick={() => setStep("privacy")} className="font-semibold text-[#4A7FAE]" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>Privacy Policy</button>
                   </span>
-                </button>
+                </div>
 
                 {authError && <p className="text-[12px] font-medium text-[#C67B6C] px-0.5">{authError}</p>}
                 <button
@@ -1303,9 +1308,26 @@ function LoginScreen({ viewportH, pendingInviteId, inviteInfo }) {
                   {submitting ? "Creating…" : (pendingInviteId ? "Create account" : "Create household")}
                 </button>
               </div>
-              <p className="text-[11px] text-[var(--text-tertiary)] mt-4 leading-relaxed">
-                This is a preview build — the Terms of Service and Privacy Policy links above aren't wired to real documents yet, that needs actual legal drafting before this ships, not placeholder text.
-              </p>
+            </div>
+          )}
+
+          {step === "terms" && (
+            <div>
+              <button onClick={() => setStep("signup")} className="mb-4 px-6" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                <ChevronLeft size={20} color="#4A7FAE" />
+              </button>
+              <h1 className="font-display text-[22px] text-[var(--text-primary)] mb-1 px-6">Terms of Service</h1>
+              <TermsOfServiceContent />
+            </div>
+          )}
+
+          {step === "privacy" && (
+            <div>
+              <button onClick={() => setStep("signup")} className="mb-4 px-6" style={{ backgroundColor: "transparent", WebkitAppearance: "none" }}>
+                <ChevronLeft size={20} color="#4A7FAE" />
+              </button>
+              <h1 className="font-display text-[22px] text-[var(--text-primary)] mb-1 px-6">Privacy Policy</h1>
+              <PrivacyPolicyContent />
             </div>
           )}
 
@@ -3303,7 +3325,7 @@ function Toggle({ on, onClick }) {
 }
 
 function SettingsScreen({ settings, persistSettings, onLogout, onDeleteAllData, onSimulateReopen, household, persistHousehold, myRole, infoBank, persistInfoBank, households, activeHouseholdId, switchHousehold, notifPermission, requestNotifications, speakText }) {
-  const [section, setSection] = useState(null); // null | 'profile' | 'notifications' | 'security' | 'privacy' | 'help' | 'infobank'
+  const [section, setSection] = useState(null); // null | 'profile' | 'notifications' | 'security' | 'privacy' | 'help' | 'infobank' | 'terms' | 'privacypolicy'
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const rows = [
@@ -3316,6 +3338,8 @@ function SettingsScreen({ settings, persistSettings, onLogout, onDeleteAllData, 
     { key: "security", label: "Security", icon: ShieldCheck },
     { key: "privacy", label: "Privacy & Data", icon: Lock },
     { key: "help", label: "Help Center", icon: HelpCircle },
+    { key: "terms", label: "Terms of Service", icon: FileText },
+    { key: "privacypolicy", label: "Privacy Policy", icon: ScrollText },
   ];
 
   const updateProfile = (patch) => persistSettings({ ...settings, profile: { ...settings.profile, ...patch } });
@@ -3469,6 +3493,22 @@ function SettingsScreen({ settings, persistSettings, onLogout, onDeleteAllData, 
             care team.
           </p>
         </div>
+      </SettingsSubpage>
+    );
+  }
+
+  if (section === "terms") {
+    return (
+      <SettingsSubpage title="Terms of Service" onBack={() => setSection(null)} noCard>
+        <TermsOfServiceContent />
+      </SettingsSubpage>
+    );
+  }
+
+  if (section === "privacypolicy") {
+    return (
+      <SettingsSubpage title="Privacy Policy" onBack={() => setSection(null)} noCard>
+        <PrivacyPolicyContent />
       </SettingsSubpage>
     );
   }
@@ -3857,6 +3897,216 @@ function AccessibilityScreen({ settings, persistSettings, onBack }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Legal — content only, no header/back button of its own, so the same body
+// can be dropped into either LoginScreen's pre-auth "terms"/"privacy" steps
+// or a SettingsSubpage for signed-in users to review any time. Reachable from
+// both signup and Settings. Last updated July 30, 2026.
+// ---------------------------------------------------------------------------
+function LegalSection({ number, title, children }) {
+  return (
+    <div className="mb-5">
+      <h2 className="text-[14px] font-semibold text-[var(--text-primary)] mb-1.5">{number}. {title}</h2>
+      <div className="text-[13px] text-[var(--text-secondary)] leading-relaxed">{children}</div>
+    </div>
+  );
+}
+
+function LegalCallout({ children }) {
+  return (
+    <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: "var(--bg-page)", border: "1px solid var(--border-subtle)" }}>
+      <p className="text-[13px] text-[var(--text-primary)] leading-relaxed">{children}</p>
+    </div>
+  );
+}
+
+function PrivacyPolicyContent() {
+  return (
+    <div className="px-6 pb-6">
+      <p className="text-[11px] text-[var(--text-tertiary)] mb-4">Last updated: July 30, 2026</p>
+      <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed mb-5">
+        Escape ("we," "us," "the app") is currently an <strong className="text-[var(--text-primary)]">early-stage prototype</strong>, not a
+        finished commercial product. This policy tells you exactly what happens to your data right now, today — not what we eventually
+        plan to build. If that changes, this page changes with it.
+      </p>
+
+      <LegalCallout>
+        Escape stores whatever you and the people you invite choose to type into it — care logs, appointments, notes about a child's
+        health and behavior — and shows it back to the account holders you've explicitly granted access to. We don't sell data, we don't
+        run ads, we don't share it with anyone outside your household unless you invite them in. We are{" "}
+        <strong>not yet a HIPAA-covered entity</strong>, have <strong>not undergone a formal third-party security audit</strong>, and you
+        should not treat this app as a secure medical record system yet. Read on for the specifics.
+      </LegalCallout>
+
+      <LegalSection number={1} title="What we collect">
+        <ul className="list-disc pl-5 mb-2 [&>li]:mb-1.5">
+          <li><strong className="text-[var(--text-primary)]">Account information</strong>: your email address and password (handled by
+            our authentication provider, Supabase Auth — we never see or store your raw password).</li>
+          <li><strong className="text-[var(--text-primary)]">Household and profile data</strong>: names, initials, and roles of people
+            you add to a household.</li>
+          <li><strong className="text-[var(--text-primary)]">Care and health information you enter</strong>: timeline log entries,
+            categories (including medical, behavioral, and incident logs), notes, appointment details, and anything you put in the Info
+            Bank. This can include sensitive health information about a child under specialist care.{" "}
+            <strong className="text-[var(--text-primary)]">You control what goes in here</strong> — don't enter more than you're
+            comfortable with given the current security posture described below.</li>
+          <li><strong className="text-[var(--text-primary)]">Invite data</strong>: email addresses of people you invite to a household,
+            and the status of that invite.</li>
+          <li><strong className="text-[var(--text-primary)]">Basic technical data</strong>: standard server logs (IP address, timestamps,
+            error logs) generated automatically by our hosting providers for debugging and abuse prevention.</li>
+        </ul>
+        <p>We do not collect location data, browsing history outside the app, or any data via advertising trackers, because we don't use any.</p>
+      </LegalSection>
+
+      <LegalSection number={2} title="Who processes this data (our subprocessors)">
+        <p className="mb-2">Your data passes through a small number of infrastructure providers, each under their own security/privacy terms:</p>
+        <ul className="list-disc pl-5 mb-2 [&>li]:mb-1.5">
+          <li><strong className="text-[var(--text-primary)]">Supabase</strong> (database, authentication, and backend hosting) — data is
+            stored in the ca-central-1 region (Canada).</li>
+          <li><strong className="text-[var(--text-primary)]">Vercel</strong> (application hosting for the web app itself).</li>
+          <li><strong className="text-[var(--text-primary)]">Resend</strong> (transactional email delivery — used only to send household
+            invite emails; it sees the invited email address and invite details, nothing else).</li>
+        </ul>
+        <p>We do not use any analytics, advertising, or data-broker services. No third party receives your data for marketing purposes, ever.</p>
+      </LegalSection>
+
+      <LegalSection number={3} title="How we use your data">
+        <p>Strictly to run the app for you: storing and displaying your household's care logs, sending invite emails you ask us to send,
+          and authenticating your login. We do not analyze, mine, or use your data to train any AI model, ours or anyone else's. We do
+          not use it for any purpose beyond directly serving your request.</p>
+      </LegalSection>
+
+      <LegalSection number={4} title="Who can see your data">
+        <p>Only the account holders within a household that you (or another owner/editor in that household) have explicitly invited, at
+          the access level (owner, full, or view-only) assigned to them. Escape itself is designed as a{" "}
+          <strong className="text-[var(--text-primary)]">neutral data shelf</strong> — we store and display information, we do not
+          interpret it, restrict it, or share it beyond the access you've configured. Anthropic-built tools used to develop this app
+          (Claude Code) do not have standing access to your live production data.</p>
+      </LegalSection>
+
+      <LegalSection number={5} title="Children's data">
+        <p>Escape is built for parents/guardians and caregivers to log care information about a child. Children are not account holders
+          and do not directly provide data to us — everything about a child is entered by an adult household member on their behalf. If
+          you are a healthcare provider or extended family member added to a household, you are being given access by that child's
+          parent or guardian, not by us.</p>
+      </LegalSection>
+
+      <LegalSection number={6} title="Security — read this part carefully">
+        <ul className="list-disc pl-5 mb-2 [&>li]:mb-1.5">
+          <li>Data is encrypted in transit (HTTPS) and at rest via Supabase's standard infrastructure encryption.</li>
+          <li>Row-Level Security (RLS) policies restrict database access so that, in principle, users can only read/write data for
+            households they belong to.</li>
+          <li><strong className="text-[var(--text-primary)]">However</strong>: this app has not yet been through a formal third-party
+            security audit or penetration test. It is not currently HIPAA-compliant, and we make no certification that it meets any
+            specific regulatory security standard (HIPAA, PIPEDA, or otherwise).</li>
+        </ul>
+        <p>Given that, <strong className="text-[var(--text-primary)]">we recommend against entering highly sensitive information (e.g.,
+          full diagnoses tied to identifying details, legal case numbers) until this is stated otherwise</strong> in a future update to
+          this policy.</p>
+      </LegalSection>
+
+      <LegalSection number={7} title="Data retention and deletion">
+        <p>Your data is retained as long as your account exists. You can request full account and data deletion at any time by
+          contacting us (below); we will delete your account data from our production database within 30 days of a verified request,
+          except where retention is required by law.</p>
+      </LegalSection>
+
+      <LegalSection number={8} title="Your rights">
+        <p>You can request to access, export, correct, or delete your data at any time. Contact us using the details below and we'll
+          respond as quickly as we can — this is a small, early-stage project, so response times may vary, but we will respond.</p>
+      </LegalSection>
+
+      <LegalSection number={9} title="Changes to this policy">
+        <p>Because this app is actively evolving, this policy will change. We'll update the "Last updated" date at the top whenever we
+          do, and material changes (like a shift in what data we collect or who we share it with) will be flagged clearly in-app, not
+          buried.</p>
+      </LegalSection>
+
+      <LegalSection number={10} title="Contact">
+        <p>For any privacy question, data request, or concern, contact:{" "}
+          <a href="mailto:privacy@escapehousehold.com" className="font-semibold text-[#4A7FAE]">privacy@escapehousehold.com</a></p>
+      </LegalSection>
+    </div>
+  );
+}
+
+function TermsOfServiceContent() {
+  return (
+    <div className="px-6 pb-6">
+      <p className="text-[11px] text-[var(--text-tertiary)] mb-4">Last updated: July 30, 2026</p>
+      <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed mb-5">
+        Please read these terms before using Escape. By creating an account or using the app, you agree to them.
+      </p>
+
+      <LegalSection number={1} title="What Escape is right now">
+        <p>Escape is an <strong className="text-[var(--text-primary)]">early-stage prototype</strong>, actively being built and tested.
+          It is not a finished, commercially supported medical records product. Features may change, break, or be removed without
+          notice. Data loss, while something we actively try to prevent, is possible at this stage —{" "}
+          <strong className="text-[var(--text-primary)]">do not treat Escape as your only copy of critical medical or care
+          information.</strong> Keep records elsewhere too.</p>
+      </LegalSection>
+
+      <LegalSection number={2} title="Not medical advice">
+        <p>Escape is a tool for logging and organizing information about a child's care — it is{" "}
+          <strong className="text-[var(--text-primary)]">not</strong> a medical device, diagnostic tool, or substitute for professional
+          medical, therapeutic, or legal advice. Nothing in the app should be interpreted as a treatment recommendation. Always consult
+          qualified professionals for medical decisions. In an emergency, contact emergency services directly — do not rely on this app.</p>
+      </LegalSection>
+
+      <LegalSection number={3} title="Who can use Escape">
+        <p>You must be at least 18 years old to create an account. Escape is designed for parents, guardians, caregivers, and the
+          healthcare/support providers they explicitly invite into a household. You're responsible for the accuracy of anything you
+          personally enter.</p>
+      </LegalSection>
+
+      <LegalSection number={4} title="Your account and household data">
+        <ul className="list-disc pl-5 [&>li]:mb-1.5">
+          <li>You're responsible for keeping your login credentials secure and for anything that happens under your account.</li>
+          <li>As a household owner, you control who is invited into your household and at what access level. You are responsible for
+            only inviting people you trust with the information stored there.</li>
+          <li>You own the data you enter. We don't claim any ownership over your household's care logs, notes, or records.</li>
+        </ul>
+      </LegalSection>
+
+      <LegalSection number={5} title="Acceptable use">
+        <p>Don't use Escape to: store data about someone else's child without authorization from their parent/guardian; harass,
+          impersonate, or misrepresent yourself to another household member; attempt to access data outside households you've been
+          legitimately invited to; or use the platform for any unlawful purpose.</p>
+      </LegalSection>
+
+      <LegalSection number={6} title="No warranty">
+        <p>Escape is provided <strong className="text-[var(--text-primary)]">"as is" and "as available,"</strong> without warranties of
+          any kind, express or implied, including but not limited to fitness for a particular purpose, uninterrupted availability, or
+          error-free operation. As a prototype, bugs, downtime, and data inconsistencies are more likely than in a mature product.</p>
+      </LegalSection>
+
+      <LegalSection number={7} title="Limitation of liability">
+        <p>To the fullest extent permitted by law, Escape and its developer(s) are not liable for any indirect, incidental, or
+          consequential damages arising from your use of the app, including but not limited to data loss, missed appointments, or
+          miscommunication between household members. Escape is a data organization tool; decisions made based on information logged in
+          it remain the responsibility of the people making them.</p>
+      </LegalSection>
+
+      <LegalSection number={8} title="Termination">
+        <p>You can delete your account at any time. We reserve the right to suspend or terminate accounts that violate these terms,
+          particularly around unauthorized access to a child's data or misuse of the invite system.</p>
+      </LegalSection>
+
+      <LegalSection number={9} title="Changes to the service and these terms">
+        <p>Because this is an actively developed prototype, both the app and these terms will change over time. We'll update the "Last
+          updated" date above whenever these terms change, and we'll flag material changes clearly in-app.</p>
+      </LegalSection>
+
+      <LegalSection number={10} title="Governing law">
+        <p>These terms are governed by the laws of the Province of Ontario, Canada, without regard to conflict-of-law principles.</p>
+      </LegalSection>
+
+      <LegalSection number={11} title="Contact">
+        <p>Questions about these terms:{" "}
+          <a href="mailto:hello@escapehousehold.com" className="font-semibold text-[#4A7FAE]">hello@escapehousehold.com</a></p>
+      </LegalSection>
+    </div>
+  );
+}
 
 function SettingsSubpage({ title, onBack, children, noCard }) {
   return (
