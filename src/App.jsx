@@ -90,6 +90,7 @@ export default function App() {
     categoryColors: {}, // per-category color overrides, keyed by category — empty means "use defaults"
     readAloud: false, // tap-to-hear accessibility mode
     darkMode: false,
+    timeFormat: "12h", // "12h" | "24h"
   });
   const myRole = household.members.find((m) => m.isYou)?.role || "owner";
 
@@ -520,7 +521,7 @@ export default function App() {
         const dayEntries = tl[occurredDate] || [];
         const entry = {
           id: uid(),
-          time: new Date(it.timestamp).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
+          time: new Date(it.timestamp).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true }),
           date: occurredDate, category: it.category, title: it.title, subtitle: it.subtitle,
           loggedBy: "Recurring schedule",
         };
@@ -688,7 +689,7 @@ export default function App() {
     const dayEntries = tl[day] || [];
     const entry = {
       id: uid(),
-      time: new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
+      time: new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true }),
       date: day,
       category: item.category,
       title: item.title,
@@ -869,7 +870,7 @@ export default function App() {
             <TodayScreen
               household={household} childId={childId} setChildId={setChildId}
               careItems={careItems[childId] || []} timeline={timeline[childId] || {}}
-              upcoming={upcoming[childId] || []} speakText={speakText}
+              upcoming={upcoming[childId] || []} speakText={speakText} timeFormat={settings.timeFormat}
               now={now} onOpenQuickLog={() => setQuickLogOpen(true)} myRole={myRole}
               onEditEntry={(dayKey, entryId, patch) => editTimelineEntry(childId, dayKey, entryId, patch)}
               onDeleteEntry={(dayKey, entryId) => deleteTimelineEntry(childId, dayKey, entryId)}
@@ -884,7 +885,7 @@ export default function App() {
             <TimelineScreen
               household={household} childId={childId} setChildId={setChildId}
               careItems={careItems[childId] || []} timeline={timeline[childId] || {}}
-              now={now} myRole={myRole} speakText={speakText}
+              now={now} myRole={myRole} speakText={speakText} timeFormat={settings.timeFormat}
               centerOffset={timelineOffset} setCenterOffset={setTimelineOffset}
               onEditEntry={(dayKey, entryId, patch) => editTimelineEntry(childId, dayKey, entryId, patch)}
               onDeleteEntry={(dayKey, entryId) => deleteTimelineEntry(childId, dayKey, entryId)}
@@ -1497,7 +1498,7 @@ function CreateHouseholdScreen({ viewportH, onCreate, onLogout, dbError, onDismi
 // ---------------------------------------------------------------------------
 // Today
 // ---------------------------------------------------------------------------
-function TodayScreen({ household, childId, setChildId, careItems, timeline, upcoming, now, onOpenQuickLog, onEditEntry, onDeleteEntry, onEditUpcoming, onDeleteUpcoming, onLogPreset, onEditPreset, onDeletePreset, myRole, speakText }) {
+function TodayScreen({ household, childId, setChildId, careItems, timeline, upcoming, now, onOpenQuickLog, onEditEntry, onDeleteEntry, onEditUpcoming, onDeleteUpcoming, onLogPreset, onEditPreset, onDeletePreset, myRole, speakText, timeFormat }) {
   const [filter, setFilter] = useState("all");
   const [showAll, setShowAll] = useState(false);
   const [selected, setSelected] = useState(null); // entry | null (always today's dayKey here)
@@ -1622,7 +1623,7 @@ function TodayScreen({ household, childId, setChildId, careItems, timeline, upco
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-[14px] text-[var(--text-primary)] font-semibold truncate">{u.title}</p>
-                    <p className="text-[12px] text-[var(--text-secondary)] truncate">{u.subtitle || new Date(u.timestamp).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</p>
+                    <p className="text-[12px] text-[var(--text-secondary)] truncate">{u.subtitle || new Date(u.timestamp).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit", hour12: timeFormat !== "24h" })}</p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: urgencyColor }}>{overdue ? "" : "in"}</p>
@@ -1649,7 +1650,7 @@ function TodayScreen({ household, childId, setChildId, careItems, timeline, upco
               </div>
               <div className="min-w-0 flex-1"><p className="text-[14px] text-[var(--text-primary)] font-semibold truncate">{e.title}</p><p className="text-[12px] text-[var(--text-secondary)] truncate">{e.subtitle}</p></div>
               <div className="flex items-center gap-2 shrink-0">
-                <p className="tnum text-[13px] text-[var(--text-secondary)] font-medium">{formatTimeRange(e.time, e.endTime)}</p>
+                <p className="tnum text-[13px] text-[var(--text-secondary)] font-medium">{formatTimeRange(e.time, e.endTime, timeFormat)}</p>
                 <ChevRight size={14} color="var(--border-medium)" />
               </div>
             </button>
@@ -1666,6 +1667,7 @@ function TodayScreen({ household, childId, setChildId, careItems, timeline, upco
           entry={selected}
           myRole={myRole}
           speakText={speakText}
+          timeFormat={timeFormat}
           onClose={() => setSelected(null)}
           onSave={(patch) => { onEditEntry(today, selected.id, patch); setSelected(null); }}
           onDelete={() => { onDeleteEntry(today, selected.id); setSelected(null); }}
@@ -1677,6 +1679,7 @@ function TodayScreen({ household, childId, setChildId, careItems, timeline, upco
           item={selectedUpcoming}
           myRole={myRole}
           speakText={speakText}
+          timeFormat={timeFormat}
           onClose={() => setSelectedUpcoming(null)}
           onSave={(patch) => { onEditUpcoming(selectedUpcoming.id, patch); setSelectedUpcoming(null); }}
           onDelete={() => { onDeleteUpcoming(selectedUpcoming.id); setSelectedUpcoming(null); }}
@@ -1701,7 +1704,7 @@ function TodayScreen({ household, childId, setChildId, careItems, timeline, upco
 // ---------------------------------------------------------------------------
 // Timeline
 // ---------------------------------------------------------------------------
-function TimelineScreen({ household, childId, setChildId, careItems, timeline, now, onEditEntry, onDeleteEntry, myRole, centerOffset, setCenterOffset, speakText }) {
+function TimelineScreen({ household, childId, setChildId, careItems, timeline, now, onEditEntry, onDeleteEntry, myRole, centerOffset, setCenterOffset, speakText, timeFormat }) {
   const [dragX, setDragX] = useState(0);
   const [animating, setAnimating] = useState(false);
   const [filter, setFilter] = useState("all");
@@ -1908,7 +1911,7 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
                   <p className="text-[14px] text-[var(--text-primary)] font-semibold truncate">{e.title}</p>
                   <p className="text-[12px] text-[var(--text-secondary)] truncate">{formatEntryDate(e.dayKey)} · {e.subtitle}</p>
                 </div>
-                <p className="tnum text-[12px] text-[var(--text-secondary)] font-medium shrink-0">{formatTimeRange(e.time, e.endTime)}</p>
+                <p className="tnum text-[12px] text-[var(--text-secondary)] font-medium shrink-0">{formatTimeRange(e.time, e.endTime, timeFormat)}</p>
               </button>
             );
           })}
@@ -1918,7 +1921,7 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
           <div className="flex" style={trackStyle}>
             {pages.map((offset) => (
               <div key={offset} className="w-full shrink-0 px-5" style={{ width: "100%" }}>
-                <DayCard offset={offset} entries={sortEntriesByTime(timeline[dateKey(addDays(new Date(), offset))] || [])}
+                <DayCard offset={offset} entries={sortEntriesByTime(timeline[dateKey(addDays(new Date(), offset))] || [])} timeFormat={timeFormat}
                   onSelect={(entry) => setSelected({ dayKey: dateKey(addDays(new Date(), offset)), entry })} />
               </div>
             ))}
@@ -1931,6 +1934,7 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
           entry={selected.entry}
           myRole={myRole}
           speakText={speakText}
+          timeFormat={timeFormat}
           onClose={() => setSelected(null)}
           onSave={(patch) => { onEditEntry(selected.dayKey, selected.entry.id, patch); setSelected(null); }}
           onDelete={() => { onDeleteEntry(selected.dayKey, selected.entry.id); setSelected(null); }}
@@ -1940,7 +1944,7 @@ function TimelineScreen({ household, childId, setChildId, careItems, timeline, n
   );
 }
 
-function DayCard({ offset, entries, onSelect }) {
+function DayCard({ offset, entries, onSelect, timeFormat }) {
   const label = offset === 0 ? "Today" : offset === -1 ? "Yesterday" : offset === 1 ? "Tomorrow"
     : addDays(new Date(), offset).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   return (
@@ -1961,7 +1965,7 @@ function DayCard({ offset, entries, onSelect }) {
                 <p className="text-[14px] text-[var(--text-primary)] font-semibold truncate">{e.title}</p>
                 <p className="text-[12px] text-[var(--text-secondary)] truncate">{e.subtitle}</p>
               </div>
-              <p className="tnum text-[12px] text-[var(--text-secondary)] font-medium shrink-0">{formatTimeRange(e.time, e.endTime)}</p>
+              <p className="tnum text-[12px] text-[var(--text-secondary)] font-medium shrink-0">{formatTimeRange(e.time, e.endTime, timeFormat)}</p>
               <ChevRight size={14} color="var(--border-medium)" className="shrink-0" />
             </button>
           );
@@ -1976,7 +1980,7 @@ function DayCard({ offset, entries, onSelect }) {
 // same shape as EntryDetailModal but with a real date+time instead of a
 // same-day time string, since this represents something that hasn't happened yet.
 // ---------------------------------------------------------------------------
-function UpcomingDetailModal({ item, myRole, onClose, onSave, onDelete, speakText }) {
+function UpcomingDetailModal({ item, myRole, onClose, onSave, onDelete, speakText, timeFormat }) {
   const [editing, setEditing] = useState(false);
   const [category, setCategory] = useState(item.category);
   const [title, setTitle] = useState(item.title);
@@ -2027,7 +2031,7 @@ function UpcomingDetailModal({ item, myRole, onClose, onSave, onDelete, speakTex
               </div>
               <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: item.notes ? "1px solid var(--border-subtle)" : "none" }}>
                 <span className="text-[12px] text-[var(--text-secondary)]">When</span>
-                <span className="tnum text-[13px] font-medium text-[var(--text-primary)]">{new Date(item.timestamp).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                <span className="tnum text-[13px] font-medium text-[var(--text-primary)]">{new Date(item.timestamp).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: timeFormat !== "24h" })}</span>
               </div>
               <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: item.notes ? "1px solid var(--border-subtle)" : "none" }}>
                 <span className="text-[12px] text-[var(--text-secondary)]">Repeats</span>
@@ -2125,7 +2129,7 @@ function UpcomingDetailModal({ item, myRole, onClose, onSave, onDelete, speakTex
   );
 }
 
-function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText }) {
+function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText, timeFormat }) {
   const [editing, setEditing] = useState(false);
   const [category, setCategory] = useState(entry.category);
   const [title, setTitle] = useState(entry.title);
@@ -2175,7 +2179,7 @@ function EntryDetailModal({ entry, onClose, onSave, onDelete, myRole, speakText 
               </div>
               <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                 <span className="text-[12px] text-[var(--text-secondary)]">Time</span>
-                <span className="tnum text-[13px] font-medium text-[var(--text-primary)]">{formatTimeRange(entry.time, entry.endTime)}</span>
+                <span className="tnum text-[13px] font-medium text-[var(--text-primary)]">{formatTimeRange(entry.time, entry.endTime, timeFormat)}</span>
               </div>
               {entry.endTime && (
                 <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -3893,6 +3897,19 @@ function AccessibilityScreen({ settings, persistSettings, onBack }) {
           account, so it stays on wherever you log in.
         </p>
       </div>
+
+      <div className="mx-5 mt-3 rounded-3xl p-4" style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border-default)" }}>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[14px] font-semibold text-[var(--text-primary)]">24-hour time</span>
+          <Toggle on={settings.timeFormat === "24h"} onClick={() => persistSettings({ ...settings, timeFormat: settings.timeFormat === "24h" ? "12h" : "24h" })} />
+        </div>
+        <p className="text-[12.5px] text-[var(--text-secondary)] leading-relaxed">
+          Shows times like 14:00 instead of 2:00 PM across Timeline, Today, and appointments. Remembered
+          on your account, same as Dark Mode. Native time pickers (the wheel you use to pick a time when
+          logging or scheduling something) still follow your device's own settings — that part isn't
+          something an app can override.
+        </p>
+      </div>
     </SettingsSubpage>
   );
 }
@@ -4171,7 +4188,7 @@ function QuickLogModal({ kids, activeChildId, items, now, onLog, onAddFreeform, 
   const fmtTimeLabel = (hhmm) => {
     const [h, m] = hhmm.split(":").map(Number);
     const d = targetDateBase(); d.setHours(h, m, 0, 0);
-    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true }); // stored form is always 12h; display formatting happens separately, at render time
   };
 
   const trackingValueValid = timingModel === "scheduled" ? Number(intervalHours) > 0 : Number(minGapHours) > 0;

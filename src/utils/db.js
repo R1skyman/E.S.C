@@ -57,6 +57,7 @@ function settingsFromRow(row) {
     notifyMeds: row.notify_meds, notifyEvents: row.notify_events, notifyChannel: row.notify_channel,
     profile: { firstName: row.first_name || "", lastName: row.last_name || "", email: row.email || "", phone: row.phone || "" },
     categoryColors: row.category_colors || {}, readAloud: row.read_aloud, darkMode: row.dark_mode,
+    timeFormat: row.time_format || "12h",
   };
 }
 
@@ -317,6 +318,7 @@ export async function saveSettingsRow(userId, settings) {
     notify_channel: settings.notifyChannel, first_name: settings.profile.firstName, last_name: settings.profile.lastName,
     email: settings.profile.email, phone: settings.profile.phone, category_colors: settings.categoryColors || {},
     read_aloud: !!settings.readAloud, dark_mode: !!settings.darkMode,
+    time_format: settings.timeFormat === "24h" ? "24h" : "12h",
   };
   throwIfError((await supabase.from("user_settings").update(row).eq("user_id", userId)).error);
 }

@@ -6,10 +6,12 @@ export const dateKey = (d) => {
 export const addDays = (base, n) => { const d = new Date(base); d.setDate(d.getDate() + n); return d; };
 
 // Turns a native time input's "HH:MM" value into something natural to speak, e.g. "3:45 PM".
+// Deliberately always spoken in 12h form regardless of the display format setting — "fourteen
+// hundred" isn't how people naturally say times aloud, even if they prefer seeing 24h on screen.
 export const formatTimeForSpeech = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date(); d.setHours(h, m, 0, 0);
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
 };
 
 export function nextOccurrence(timestamp, recurrence, now) {
@@ -39,22 +41,49 @@ export function formatEntryDate(dateStr) {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+// Parses a *stored* display string back to raw 24h "HH:MM". Handles both forms it might
+// actually be in: "9:00 AM" (12h, written by time24hToDisplay below) and "14:00" (24h — either
+// written directly somewhere, or read from an entry stored back when the device's locale
+// defaulted toLocaleTimeString to 24h before this was made explicit). Falls back to noon only
+// if the string genuinely doesn't parse as either.
 export function timeDisplayTo24h(display) {
-  const m = String(display || "").match(/(\d+):(\d+)\s*([AP]M)/i);
-  if (!m) return "12:00";
-  let h = parseInt(m[1], 10);
-  const min = m[2];
-  const ap = m[3].toUpperCase();
-  if (ap === "PM" && h !== 12) h += 12;
-  if (ap === "AM" && h === 12) h = 0;
-  return `${String(h).padStart(2, "0")}:${min}`;
+  const s = String(display || "").trim();
+  const m12 = s.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
+  if (m12) {
+    let h = parseInt(m12[1], 10);
+    const min = m12[2];
+    const ap = m12[3].toUpperCase();
+    if (ap === "PM" && h !== 12) h += 12;
+    if (ap === "AM" && h === 12) h = 0;
+    return `${String(h).padStart(2, "0")}:${min}`;
+  }
+  const m24 = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) return `${m24[1].padStart(2, "0")}:${m24[2]}`;
+  return "12:00";
 }
 
+// Writes the stored display string at log time — always 12h with AM/PM, regardless of the
+// device's locale or the user's current display preference, so what's on disk is deterministic
+// and always round-trips cleanly through timeDisplayTo24h. The user's 12h/24h *display*
+// preference is applied separately, at render time, via formatStoredTime — never baked into
+// storage, so flipping the toggle instantly reformats every entry, past and future alike.
 export function time24hToDisplay(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();
   d.setHours(h, m, 0, 0);
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+// Reformats a stored display string according to the user's 12h/24h preference. This is the one
+// place that actually branches on the setting — every other display helper (formatTimeRange)
+// goes through this, so a single toggle reformats every already-logged entry immediately, not
+// just new ones.
+export function formatStoredTime(display, format = "12h") {
+  const [h, m] = timeDisplayTo24h(display).split(":").map(Number);
+  if (format === "24h") return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 // Minutes since midnight from a display-formatted time ("9:00 AM" -> 540), for sorting.
@@ -71,10 +100,13 @@ export function sortEntriesByTime(entries) {
   return [...entries].sort((a, b) => timeToMinutes(b.time) - timeToMinutes(a.time));
 }
 
-// "9:00 AM" + "10:30 AM" -> "9:00 AM – 10:30 AM"; falls back to just the start time when
-// there's no end time, so every call site can use this instead of branching itself.
-export function formatTimeRange(time, endTime) {
-  return endTime ? `${time} – ${endTime}` : time;
+// "9:00 AM" + "10:30 AM" -> "9:00 AM – 10:30 AM" (or "09:00 – 10:30" in 24h mode); falls back to
+// just the start time when there's no end time, so every call site can use this instead of
+// branching itself. Reformats both through formatStoredTime, so this respects the current
+// display preference regardless of what format the strings happen to be stored in.
+export function formatTimeRange(time, endTime, format = "12h") {
+  const t = formatStoredTime(time, format);
+  return endTime ? `${t} – ${formatStoredTime(endTime, format)}` : t;
 }
 
 // Minutes between two display-formatted times ("9:00 AM", "10:30 AM"), e.g. "1h 30m". Assumes
