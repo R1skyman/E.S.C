@@ -1,0 +1,15 @@
+-- SECURITY FIX: "insert self as member" only checked that user_id = auth.uid(),
+-- with no check on household_id or role. Any authenticated user could directly
+-- INSERT a household_members row for themselves into ANY household with role
+-- 'owner', completely bypassing the invite system (no email match, no expiry
+-- check). The app never legitimately inserts household_members from the client
+-- anyway -- membership is only ever created via the create_household and
+-- accept_invite SECURITY DEFINER functions, which run with elevated privilege
+-- and bypass RLS by design, validating everything (invite email match, expiry)
+-- before inserting. So this client-facing INSERT policy served no legitimate
+-- purpose and only left a hole open. Removing it closes direct client inserts
+-- to this table entirely -- membership changes must go through the RPCs.
+--
+-- Backfilled into source control after the fact -- this was applied directly
+-- to the live project and was missing from this repo's migration history.
+drop policy if exists "insert self as member" on public.household_members;
